@@ -75,7 +75,8 @@ export function runBootSequence(root: HTMLElement): Promise<void> {
   return new Promise((resolve) => {
     const instant = prefersReducedMotion();
     const log = h("pre", { class: "boot-log", "aria-live": "polite" });
-    const prompt = h("p", { class: "boot-prompt", hidden: true });
+    // Always takes up its line, so showing it never covers the text.
+    const prompt = h("p", { class: "boot-prompt" }, "\u00a0");
     const bar = h("div", { class: "boot-bar-fill" });
     const skip = h(
       "button",
@@ -136,23 +137,29 @@ export function runBootSequence(root: HTMLElement): Promise<void> {
         if (line && !instant) playSfx("tick");
         if (!instant) await wait(LINE_MS);
       }
-      print("\nLOADING OPERATOR BRIEFING\n=========================\n");
+      print("\nLOADING OPERATOR BRIEFING ...\n");
+      if (!instant) await wait(LINE_MS * 4);
 
       for (const [i, step] of BRIEFING.entries()) {
         if (done) return;
         setProgress(i / BRIEFING.length);
         playSfx("blip");
-        print(`\n[${i + 1}/${BRIEFING.length}] ${step.title}\n`);
+        // One step per screen, so the text never runs into the prompt.
+        log.replaceChildren(
+          `OPERATOR BRIEFING  ${i + 1} / ${BRIEFING.length}\n\n`,
+          h("strong", { class: "boot-step" }, step.title),
+          "\n\n",
+        );
         rush = false;
-        for (const line of step.lines) await type(`    ${line}\n`);
+        for (const line of step.lines) await type(`${line}\n`);
         if (done) return;
         const last = i === BRIEFING.length - 1;
         prompt.textContent = last
           ? "Press any key to start your shift"
           : "Press any key to continue";
-        prompt.hidden = false;
+        prompt.classList.add("is-waiting");
         await waitForInput();
-        prompt.hidden = true;
+        prompt.classList.remove("is-waiting");
       }
       setProgress(1);
       finish();

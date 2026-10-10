@@ -2771,8 +2771,8 @@ body.nw {
   background: #050806;
   color: var(--green-text);
   font-family: var(--font-term);
-  font-size: 22px;
-  line-height: 1.2;
+  font-size: 26px;
+  line-height: 1.3;
 }
 
 .boot::after {
@@ -2796,9 +2796,21 @@ body.nw {
   white-space: pre-wrap;
 }
 
-.boot-prompt {
-  margin: 10px 0;
+.boot-step {
   color: var(--amber-text);
+  font-size: 1.5em;
+  font-weight: normal;
+}
+
+.boot-prompt {
+  flex: none;
+  margin: 14px 0;
+  color: var(--amber-text);
+  visibility: hidden;
+}
+
+.boot-prompt.is-waiting {
+  visibility: visible;
   animation: boot-blink 1s steps(2) infinite;
 }
 
@@ -2846,7 +2858,7 @@ body.nw {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .boot-prompt {
+  .boot-prompt.is-waiting {
     animation: none;
   }
 }
