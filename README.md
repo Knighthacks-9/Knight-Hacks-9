@@ -14,7 +14,9 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. From Calibration, adjust gaze sensitivity
+Open the local URL printed by Vite. The game opens on the NIGHTWATCH desktop
+(see [Desktop UI](#desktop-ui)); the original Phaser version is still available
+at `/?ui=classic`. From Calibration, adjust gaze sensitivity
 and smoothing, enable or disable mouse fallback, or run the nine-point gaze
 calibration. Settings and the fitted calibration are saved in browser storage.
 
@@ -54,7 +56,36 @@ returns a smoothed canvas point (0..1), `getSource()` reports `tracker`,
 `mouse`, or `none`, and `isBlinking()` reports blinks. Gaze is held for up to
 350 ms through blinks and dropped frames before falling back to the mouse.
 
-### Reporting suspicious people
+### Desktop UI
+
+The default interface is a late-90s desktop built with plain TypeScript and
+DOM (`src/ui/`): Desktop → Gaze Calibration → Watch Station → Shift Debrief.
+
+- **Desktop:** double-click the shortcuts or use **START**. Set the shift length
+  and press **BEGIN SHIFT** (or **Skip calibration**). Windows drag by their
+  title bars (arrow keys move a focused title bar).
+- **Gaze Calibration:** same settings and webcam pipeline as the classic scene.
+  Without a webcam, the nine-point run is a pointer calibration: click each
+  target. **TEST GAZE** lights up the feed under your gaze or mouse.
+- **Watch Station:** `LEVEL_1`–`LEVEL_3` show 4, 6, or 9 feeds with 3, 5,
+  or 8 expected anomalies (switching restarts the shift). The world has six
+  cameras, so level 3's last three feeds are placeholders with no anomalies.
+  The corner button on a feed focuses it; **RESTORE GRID** or ESC returns.
+  **REPORT SIGHTING** (or R), then click the feed where you saw something.
+  Number keys 1–9 also work, and ESC cancels. Dispatch answers on the radio,
+  muted until you press **UNMUTE DISPATCH**. **PUSH TO TALK** (click, or hold
+  Space) and say "Camera 3, sighting" to report by voice. Pop-ups and feed
+  glitches show up during the shift; drag or close the pop-ups.
+- **Shift Debrief:** grade, detection, false reports, attention per feed, a
+  per-camera timeline, and coaching. The last debrief is saved for the
+  **Last Debrief** shortcut.
+
+A camera report counts as a catch when that feed showed a suspect during their
+suspicious behavior (or up to 5 s after); otherwise it is a false report. The UI
+talks to the game only through `NightwatchService` (`src/ui/service/`), so a
+different backend can replace `localService.ts`.
+
+### Reporting suspicious people (classic)
 
 The side panel in a shift has two tabs. A report only counts once dispatch
 has your spoken description:
@@ -129,9 +160,11 @@ functions, so there it always uses the browser fallbacks.
 | `src/analytics/` | Person 4 | Shift logging, catch/miss classification, debrief report and panel         |
 | `src/audio/`     | Shared   | Dispatcher voice and push-to-talk (`netlify/functions` proxies ElevenLabs) |
 | `src/shared/`    | Everyone | `types.ts` (the contract) and `eventBus.ts`                                |
+| `src/ui/`        | Shared   | NIGHTWATCH desktop UI; `service/` adapts it to the modules above           |
 
-`src/main.ts` boots Phaser, registers the scenes, installs analytics, and
-attaches the mouse fallback.
+`src/main.ts` installs analytics and starts the desktop UI (`src/ui`), or
+with `?ui=classic` loads `src/classic.ts`, which boots Phaser, registers the
+scenes, and attaches the mouse fallback.
 
 ## How the modules fit together
 
@@ -173,7 +206,9 @@ Rules:
   and flags share one timeline.
 - Work on feature branches and open pull requests.
 
-Dev shortcuts: `/?level=4` starts at level 4, and `/src/world/world-debug.html`
+Dev shortcuts: `/?level=4` starts at level 4 (`?level=1`–`3` in the desktop
+UI), `/?screen=calibration`, `watch`, or `debrief` opens a desktop UI screen
+directly, and `/src/world/world-debug.html`
 runs the world on its own with a top-down view.
 
 ## GitHub Pages
