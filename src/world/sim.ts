@@ -20,6 +20,8 @@ import { Rng } from "./rng";
 
 const CAMERA_AVOID_COST = 25;
 const MAX_NORMAL_NPCS = 8;
+/** NPCs that spawn ~1s apart at the start of a shift, before the normal pace. */
+const QUICK_START_NPCS = 4;
 const SHIRT_COLORS = [
   0x4f81bd, 0xc0504d, 0x9bbb59, 0x8064a2, 0x4bacc6, 0xf79646, 0xd9d9d9,
   0x7f6000,
@@ -61,6 +63,7 @@ export class WorldSim {
   private nextEvent = 1;
   private t = 0;
   private nextNormalAt = 0;
+  private normalsSpawned = 0;
   private shiftSeconds: number;
   private schedule: { at: number; behavior: SuspiciousBehavior }[];
   private camSets: { cam: CameraDef; tiles: Set<number> }[];
@@ -110,9 +113,15 @@ export class WorldSim {
     if (t < this.shiftSeconds - 20) {
       if (t >= this.nextNormalAt) {
         const alive = this.npcs.length;
-        if (alive < MAX_NORMAL_NPCS)
+        if (alive < MAX_NORMAL_NPCS) {
           this.spawn(normalPlan(this.map, this.rng));
-        this.nextNormalAt = t + this.rng.range(4, 9);
+          this.normalsSpawned++;
+        }
+        // The first few arrive quickly so the feeds aren't empty at the start.
+        this.nextNormalAt =
+          this.normalsSpawned < QUICK_START_NPCS
+            ? t + this.rng.range(0.75, 1.5)
+            : t + this.rng.range(4, 9);
       }
     }
     while (this.schedule.length > 0 && this.schedule[0].at <= t) {

@@ -6,6 +6,7 @@ import type {
   WorldMap,
   WorldSnapshot,
 } from "../shared/types";
+import { NPC_FRAME_TILES } from "../shared/npcSprites";
 import { facingFor, sheetFor, standingFrame } from "./npcSprites";
 
 interface Person {
@@ -195,9 +196,8 @@ export class CameraFeed extends Phaser.GameObjects.Container {
   }
 
   private createPerson(npcId: string): Person {
-    // The figure fills about 60% of its 64px frame; make it ~1.6 tiles tall
-    // and stand its feet on the NPC's position.
-    const size = Math.max(16, this.tileSize * 2.6);
+    // Stand the sprite's feet on the NPC's position (size shared with the UI).
+    const size = Math.max(12, this.tileSize * NPC_FRAME_TILES);
     const ring = this.scene.add
       .ellipse(0, 0, this.tileSize * 1.1, this.tileSize * 0.6)
       .setVisible(false);
