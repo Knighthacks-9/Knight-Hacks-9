@@ -91,7 +91,12 @@ export class WorldSim {
   private buildSchedule(): { at: number; behavior: SuspiciousBehavior }[] {
     const count = Math.max(3, Math.round(this.shiftSeconds / 40));
     const start = Math.min(15, this.shiftSeconds * 0.1);
-    const usable = Math.max(1, this.shiftSeconds - start - 60);
+    // Leave time at the end to finish each event. Unchanged (60s) for shifts
+    // of 90s or more; on shorter ones half the shift, since NPCs need time
+    // to walk to their spot before the suspicious part begins.
+    const s = this.shiftSeconds;
+    const endMargin = Math.min(60, Math.max(s - 30, s * 0.5));
+    const usable = Math.max(1, this.shiftSeconds - start - endMargin);
     let order: SuspiciousBehavior[] = [];
     const out: { at: number; behavior: SuspiciousBehavior }[] = [];
     for (let i = 0; i < count; i++) {
@@ -110,7 +115,9 @@ export class WorldSim {
 
   update(dt: number, t: number): void {
     this.t = t;
-    if (t < this.shiftSeconds - 20) {
+    const s = this.shiftSeconds;
+    // Stop spawning walk-ins near the end (20s, less on very short shifts).
+    if (t < s - Math.min(20, Math.max(s - 70, s * 0.3))) {
       if (t >= this.nextNormalAt) {
         const alive = this.npcs.length;
         if (alive < MAX_NORMAL_NPCS) {
@@ -250,6 +257,7 @@ export class WorldSim {
         moving: step?.kind === "walk" && n.pathIndex < n.path.length,
         color: n.color,
         cameraIds: this.camerasSeeing(n.x, n.y),
+        suspicious: n.active !== undefined,
       };
     });
     return { t: this.t, npcs };
