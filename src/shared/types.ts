@@ -1,8 +1,13 @@
 // TODO: Add the shared attention measurement interface.
 export interface Attention {}
 
-// TODO: Add the shared player flag payload.
-export interface Flag {}
+
+export interface Flag {
+  cameraId: number;
+  npcId: string | null;
+  /** Milliseconds since the shift started. */
+  t: number;
+}
 
 export type SceneKey = "Title" | "Calibration" | "Shift" | "Debrief";
 
@@ -96,4 +101,5 @@ export type AppEvents = {
   "world:snapshot": WorldSnapshot;
   "world:suspiciousStart": WorldEvent;
   "world:suspiciousEnd": WorldEvent;
+  "flag:created": Flag;
 };
