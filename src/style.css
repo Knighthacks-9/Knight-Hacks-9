@@ -1,0 +1,32 @@
+:root {
+  color: #f3f4f6;
+  background: #10131b;
+  font-family: Arial, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  display: grid;
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  place-items: center;
+}
+
+#app {
+  width: min(100vw, 960px);
+  aspect-ratio: 16 / 9;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
