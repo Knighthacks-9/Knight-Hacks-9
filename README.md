@@ -1,7 +1,6 @@
 # Night Watch
 
-A small browser-game skeleton for a four-person team. The project currently
-contains only a runnable Phaser scene flow and placeholders for each work area.
+A small browser game for a four-person team, built with Phaser and Vite.
 
 ## Requirements
 
@@ -15,9 +14,9 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. Click through Title, Calibration, Shift,
-and Debrief; each screen is intentionally just a scene name and a navigation
-prompt.
+Open the local URL printed by Vite. From Calibration, adjust gaze sensitivity
+and smoothing, enable or disable mouse fallback, or run the five-point gaze
+calibration. Settings and calibration samples are saved in browser storage.
 
 ## Scripts
 
@@ -31,7 +30,9 @@ prompt.
 
 ## Team ownership
 
-- **Person 1 — Vision:** `src/vision/` — webcam and eye-tracking placeholder
+- **Person 1 — Vision:** `src/vision/` — gaze mapping, calibration, tuning, and
+  mouse fallback; tracker samples can be supplied through the shared
+  `gazeController`
 - **Person 2 — World:** `src/world/` — map, NPC, and pathfinding placeholder
 - **Person 3 — Game:** `src/game/` — Phaser scenes and scene-flow placeholder
 - **Person 4 — Analytics:** `src/analytics/` — logging, scoring, and debrief
