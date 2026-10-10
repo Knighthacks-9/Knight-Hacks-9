@@ -18,7 +18,8 @@ const HIDDEN_TILE = 0x18201b;
 
 /**
  * One CCTV monitor: the part of the building a world camera sees, the NPCs it
- * currently sees, and the CCTV filter overlay. Clicking an NPC flags it.
+ * currently sees, and the CCTV filter overlay. Clicking an NPC picks them in a
+ * report (see ControlPanel).
  */
 export class CameraFeed extends Phaser.GameObjects.Container {
   private readonly npcLayer: Phaser.GameObjects.Container;
@@ -41,7 +42,7 @@ export class CameraFeed extends Phaser.GameObjects.Container {
     readonly camera: CameraDef,
     map: WorldMap,
     index: number,
-    private readonly onFlag: (npcId: string) => void,
+    private readonly onPersonClick: (npcId: string) => void,
   ) {
     super(scene, x, y);
 
@@ -112,14 +113,23 @@ export class CameraFeed extends Phaser.GameObjects.Container {
     );
   }
 
-  /** Highlights the feed the player is looking at. */
-  setWatched(watched: boolean): void {
-    this.border.setStrokeStyle(2, watched ? 0x4ade80 : 0x3a4a42);
+  /**
+   * Border: amber when chosen in a report, green when the player is looking
+   * at it, grey otherwise.
+   */
+  setHighlight(watched: boolean, selected: boolean): void {
+    if (selected) this.border.setStrokeStyle(4, 0xfbbf24);
+    else this.border.setStrokeStyle(2, watched ? 0x4ade80 : 0x3a4a42);
   }
 
+  /**
+   * Moves the NPC dots. Reported people get a red outline; the person picked
+   * in the current report gets a thick amber one.
+   */
   update(
     snapshot: WorldSnapshot | null,
-    flagged: ReadonlySet<string>,
+    reported: ReadonlySet<string>,
+    selectedNpc: string | null,
     shiftSeconds: number,
   ): void {
     const seen = new Set<string>();
@@ -132,7 +142,15 @@ export class CameraFeed extends Phaser.GameObjects.Container {
           this.viewX + (npc.x - this.minTileX) * this.tileSize,
           this.viewY + (npc.y - this.minTileY) * this.tileSize,
         )
-        .setStrokeStyle(2, flagged.has(npc.id) ? 0xff4040 : 0x000000, 0.9)
+        .setStrokeStyle(
+          npc.id === selectedNpc ? 4 : 2,
+          npc.id === selectedNpc
+            ? 0xfbbf24
+            : reported.has(npc.id)
+              ? 0xff4040
+              : 0x000000,
+          0.95,
+        )
         .setVisible(true);
     }
     for (const [id, dot] of this.dots) {
@@ -151,7 +169,7 @@ export class CameraFeed extends Phaser.GameObjects.Container {
     const dot = this.scene.add
       .circle(0, 0, radius, color)
       .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.onFlag(npcId));
+      .on("pointerdown", () => this.onPersonClick(npcId));
     this.dots.set(npcId, dot);
     this.npcLayer.add(dot);
     return dot;

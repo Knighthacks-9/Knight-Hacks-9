@@ -36,7 +36,7 @@ export class DebriefScene extends Phaser.Scene {
       addText(
         this,
         190,
-        `Caught ${caught} of ${report.events.length} suspicious ${report.events.length === 1 ? "person" : "people"} · ${report.falseFlags.length} false ${report.falseFlags.length === 1 ? "flag" : "flags"}`,
+        `Caught ${caught} of ${report.events.length} suspicious ${report.events.length === 1 ? "person" : "people"} · ${report.falseFlags.length} false ${report.falseFlags.length === 1 ? "report" : "reports"}`,
         22,
       );
       addText(this, 232, `Score ${report.score}`, 20, "#9ca3af");
@@ -45,7 +45,7 @@ export class DebriefScene extends Phaser.Scene {
           this,
           290,
           report.completed
-            ? "Catch at least half of them, without more false flags than catches."
+            ? "Report at least half of them, with no more false reports than correct ones."
             : "You ended the shift early.",
           18,
           "#fbbf24",
