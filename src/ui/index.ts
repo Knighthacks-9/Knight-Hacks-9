@@ -7,6 +7,7 @@ import { loadShiftSeconds } from "../game/levels";
 import { attachMouseFallback, gazeController, loadGazeModel } from "../vision";
 import type { AppContext, Screen, ScreenName, ScreenParams } from "./context";
 import { h } from "./dom";
+import { runBootSequence } from "./screens/boot";
 import { mountCalibration } from "./screens/calibration";
 import { mountDebrief } from "./screens/debrief";
 import { buildDesktop, mountMainMenu } from "./screens/desktop";
@@ -136,5 +137,8 @@ export function startNightwatchUi(root: HTMLElement): void {
   // Dev shortcut: ?screen=calibration|watch|debrief opens that screen directly.
   const start = query.get("screen") as ScreenName | null;
   if (start === "debrief") void openLastDebrief();
-  else ctx.go(start && start in SCREENS ? start : "desktop");
+  else if (start && start in SCREENS) ctx.go(start);
+  // The boot intro teaches the game; ?boot=0 skips it.
+  else if (query.get("boot") === "0") ctx.go("desktop");
+  else void runBootSequence(root).then(() => ctx.go("desktop"));
 }
