@@ -6,6 +6,13 @@ import type {
   WorldMap,
   WorldSnapshot,
 } from "../shared/types";
+import { NPC_FRAME_TILES } from "../shared/npcSprites";
+import { facingFor, sheetFor, standingFrame } from "./npcSprites";
+
+interface Person {
+  sprite: Phaser.GameObjects.Sprite;
+  ring: Phaser.GameObjects.Ellipse;
+}
 
 const TILE_COLORS: Record<TileType, number> = {
   wall: 0x0f1512,
@@ -24,7 +31,7 @@ const HIDDEN_TILE = 0x18201b;
  */
 export class CameraFeed extends Phaser.GameObjects.Container {
   private readonly npcLayer: Phaser.GameObjects.Container;
-  private readonly dots = new Map<string, Phaser.GameObjects.Arc>();
+  private readonly people = new Map<string, Person>();
   private readonly border: Phaser.GameObjects.Rectangle;
   private readonly noise: Phaser.GameObjects.Rectangle;
   private readonly clock: Phaser.GameObjects.Text;
@@ -137,7 +144,7 @@ export class CameraFeed extends Phaser.GameObjects.Container {
   }
 
   /**
-   * Moves the NPC dots. Reported people get a red outline; the person picked
+   * Moves the NPC sprites. Reported people get a red ring; the person picked
    * in the current report gets a thick amber one.
    */
   update(
@@ -150,25 +157,35 @@ export class CameraFeed extends Phaser.GameObjects.Container {
     for (const npc of snapshot?.npcs ?? []) {
       if (!npc.cameraIds.includes(this.camera.id)) continue;
       seen.add(npc.id);
-      const dot = this.dots.get(npc.id) ?? this.createDot(npc.id, npc.color);
-      dot
-        .setPosition(
-          this.viewX + (npc.x - this.minTileX) * this.tileSize,
-          this.viewY + (npc.y - this.minTileY) * this.tileSize,
-        )
-        .setStrokeStyle(
-          npc.id === selectedNpc ? 4 : 2,
-          npc.id === selectedNpc
-            ? 0xfbbf24
-            : reported.has(npc.id)
-              ? 0xff4040
-              : 0x000000,
-          0.95,
-        )
-        .setVisible(true);
+      const person = this.people.get(npc.id) ?? this.createPerson(npc.id);
+      const px = this.viewX + (npc.x - this.minTileX) * this.tileSize;
+      const py = this.viewY + (npc.y - this.minTileY) * this.tileSize;
+      const ringColor =
+        npc.id === selectedNpc
+          ? 0xfbbf24
+          : reported.has(npc.id)
+            ? 0xff4040
+            : null;
+      person.ring
+        .setPosition(px, py)
+        .setStrokeStyle(npc.id === selectedNpc ? 4 : 2, ringColor ?? 0, 0.95)
+        .setVisible(ringColor !== null);
+
+      const dir = facingFor(npc.facingDeg);
+      const sheet = person.sprite.texture.key;
+      person.sprite.setPosition(px, py).setVisible(true);
+      if (npc.moving) {
+        person.sprite.play(`${sheet}-walk-${dir}`, true);
+      } else {
+        person.sprite.stop();
+        person.sprite.setFrame(standingFrame(dir));
+      }
     }
-    for (const [id, dot] of this.dots) {
-      if (!seen.has(id)) dot.setVisible(false);
+    for (const [id, person] of this.people) {
+      if (!seen.has(id)) {
+        person.sprite.setVisible(false);
+        person.ring.setVisible(false);
+      }
     }
 
     this.noise.setFillStyle(0xffffff, Math.random() < 0.08 ? 0.06 : 0);
@@ -178,15 +195,22 @@ export class CameraFeed extends Phaser.GameObjects.Container {
     this.clock.setText(`T+${mm}:${ss}`);
   }
 
-  private createDot(npcId: string, color: number): Phaser.GameObjects.Arc {
-    const radius = Math.max(4, this.tileSize * 0.45);
-    const dot = this.scene.add
-      .circle(0, 0, radius, color)
-      .setInteractive({ useHandCursor: true })
+  private createPerson(npcId: string): Person {
+    // Stand the sprite's feet on the NPC's position (size shared with the UI).
+    const size = Math.max(12, this.tileSize * NPC_FRAME_TILES);
+    const ring = this.scene.add
+      .ellipse(0, 0, this.tileSize * 1.1, this.tileSize * 0.6)
+      .setVisible(false);
+    const sprite = this.scene.add
+      .sprite(0, 0, sheetFor(npcId), 0)
+      .setDisplaySize(size, size)
+      .setOrigin(0.5, 0.8)
+      .setInteractive({ useHandCursor: true, pixelPerfect: true })
       .on("pointerdown", () => this.onPersonClick(npcId));
-    this.dots.set(npcId, dot);
-    this.npcLayer.add(dot);
-    return dot;
+    const person = { sprite, ring };
+    this.people.set(npcId, person);
+    this.npcLayer.add([ring, sprite]);
+    return person;
   }
 
   private drawView(

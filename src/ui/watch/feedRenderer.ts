@@ -8,6 +8,17 @@ import type {
   WorldMap,
   WorldSnapshot,
 } from "../../shared/types";
+import {
+  NPC_FEET_Y,
+  NPC_FRAME,
+  NPC_FRAME_TILES,
+  NPC_SHEETS,
+  NPC_WALK_FPS,
+  facingFor,
+  facingRow,
+  npcSheetUrl,
+  sheetFor,
+} from "../../shared/npcSprites";
 import { prefersReducedMotion } from "../dom";
 import type { CameraFeed } from "../service";
 
@@ -28,6 +39,20 @@ export type GlitchKind =
   "jitter" | "split" | "static" | "contrast" | "interference" | "scan";
 
 let grain: HTMLCanvasElement | null = null;
+
+/** NPC sprite sheets, loaded once and shared by every feed. */
+const sheets = new Map<string, HTMLImageElement>();
+function npcSheet(name: string): HTMLImageElement | null {
+  if (!sheets.size) {
+    for (const key of NPC_SHEETS) {
+      const image = new Image();
+      image.src = npcSheetUrl(key);
+      sheets.set(key, image);
+    }
+  }
+  const image = sheets.get(name);
+  return image && image.complete && image.naturalWidth ? image : null;
+}
 
 /** A shared tile of film grain, drawn over every feed at a moving offset. */
 function grainTile(): HTMLCanvasElement {
@@ -162,7 +187,7 @@ export class FeedRenderer {
     this.resize();
     const f = this.frame.getContext("2d")!;
     f.drawImage(this.background, 0, 0);
-    if (this.feed.source) this.drawPeople(f, snapshot);
+    if (this.feed.source) this.drawPeople(f, snapshot, t);
     this.drawFlicker(f, t);
     this.compose(t);
     this.drawGrain(t);
@@ -171,13 +196,44 @@ export class FeedRenderer {
   private drawPeople(
     f: CanvasRenderingContext2D,
     snapshot: WorldSnapshot | null,
+    t: number,
   ) {
     const id = this.feed.id;
     const r = Math.max(2, this.tileSize * 0.42);
-    for (const npc of snapshot?.npcs ?? []) {
-      if (!npc.cameraIds.includes(id)) continue;
+    // Draw back to front so people lower on screen overlap those behind.
+    const inView = (snapshot?.npcs ?? [])
+      .filter((npc) => npc.cameraIds.includes(id))
+      .sort((a, b) => a.y - b.y);
+    for (const npc of inView) {
       const x = this.viewX + (npc.x - this.minTileX) * this.tileSize;
       const y = this.viewY + (npc.y - this.minTileY) * this.tileSize;
+      const sheet = npcSheet(sheetFor(npc.id));
+      if (sheet) {
+        // Feet shadow, then the sprite frame standing on the NPC's position.
+        f.fillStyle = "rgba(0,0,0,0.4)";
+        f.beginPath();
+        f.ellipse(x, y, r * 1.1, r * 0.5, 0, 0, Math.PI * 2);
+        f.fill();
+        const row = facingRow(facingFor(npc.facingDeg));
+        const col = npc.moving ? Math.floor(t * NPC_WALK_FPS) % 4 : 0;
+        const size = Math.max(8, this.tileSize * NPC_FRAME_TILES);
+        f.imageSmoothingEnabled = false;
+        f.filter = "saturate(0.55) brightness(0.9)"; // dim to the monitor look
+        f.drawImage(
+          sheet,
+          col * NPC_FRAME,
+          row * NPC_FRAME,
+          NPC_FRAME,
+          NPC_FRAME,
+          Math.round(x - size / 2),
+          Math.round(y - size * NPC_FEET_Y),
+          Math.round(size),
+          Math.round(size),
+        );
+        f.filter = "none";
+        continue;
+      }
+      // Sheets still loading: the original dot-and-head marker.
       f.fillStyle = "rgba(0,0,0,0.45)";
       f.beginPath();
       f.ellipse(
