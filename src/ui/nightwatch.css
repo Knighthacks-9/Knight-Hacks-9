@@ -2775,6 +2775,10 @@ body.nw {
   line-height: 1.3;
 }
 
+.boot:focus-visible {
+  outline: none;
+}
+
 .boot::after {
   content: "";
   position: absolute;
@@ -2846,9 +2850,20 @@ body.nw {
   color: var(--green-text);
 }
 
-.boot-skip:hover {
+.boot-skip:hover:not(:disabled) {
   background: var(--green);
   color: #050806;
+}
+
+.boot-skip:disabled {
+  border-color: var(--dim);
+  color: var(--dim);
+  cursor: default;
+}
+
+.boot-nav {
+  display: flex;
+  gap: 8px;
 }
 
 @keyframes boot-blink {
