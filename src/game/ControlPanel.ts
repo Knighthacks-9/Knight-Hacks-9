@@ -1,10 +1,12 @@
 import Phaser from "phaser";
 import {
   dispatchText,
+  playSfx,
   sayDispatch,
   startListening,
   stopSpeaking,
   type DispatchLineId,
+  type SfxName,
   type Transmission,
 } from "../audio";
 import { eventBus } from "../shared/eventBus";
@@ -55,6 +57,8 @@ class PanelButton {
     label: string,
     onClick: () => void,
     fill = COLORS.button,
+    /** Played on press; null when onClick plays its own sound. */
+    sound: SfxName | null = "click",
   ) {
     this.fill = fill;
     this.bg = scene.add
@@ -67,7 +71,11 @@ class PanelButton {
         () => this.enabled && this.bg.setFillStyle(COLORS.hover),
       )
       .on("pointerout", () => this.bg.setFillStyle(this.fill))
-      .on("pointerdown", () => this.enabled && onClick());
+      .on("pointerdown", () => {
+        if (!this.enabled) return playSfx("deny");
+        if (sound) playSfx(sound);
+        onClick();
+      });
     this.text = scene.add
       .text(x + width / 2, y + height / 2, label, {
         color: "#f3f4f6",
@@ -222,6 +230,7 @@ export class ControlPanel {
       "Send report ▸",
       () => this.sendReport(),
       COLORS.go,
+      "send",
     );
     this.backButton = new PanelButton(
       scene,
@@ -271,6 +280,8 @@ export class ControlPanel {
       40,
       "● TALK",
       () => this.toggleTalk(),
+      COLORS.button,
+      null,
     );
     const hint = text(y + height - 30, 11, "#6b7383").setText(
       "or hold Space to talk",
@@ -320,12 +331,15 @@ export class ControlPanel {
 
   /** The player clicked somewhere on a camera feed. */
   handleFeedClick(cameraId: string): void {
-    if (this.flow.chooseFeed(cameraId)) this.render();
+    if (!this.flow.chooseFeed(cameraId)) return;
+    playSfx("select");
+    this.render();
   }
 
   /** The player clicked a person on a camera feed. */
   handlePersonClick(cameraId: string, npcId: string): void {
-    this.flow.choosePerson(cameraId, npcId);
+    if (this.flow.choosePerson(cameraId, npcId)) playSfx("select");
+    else if (this.flow.notice) playSfx("deny");
     this.render();
   }
 
@@ -384,6 +398,7 @@ export class ControlPanel {
 
   private startTalk(): void {
     if (this.destroyed) return;
+    playSfx("talkOn");
     this.transmission = startListening();
     this.transmissionStart = this.deps.now();
     this.talk = "live";
@@ -393,6 +408,7 @@ export class ControlPanel {
   private async finishTalk(): Promise<void> {
     const transmission = this.transmission;
     if (!transmission) return;
+    playSfx("talkOff");
     this.transmission = null;
     this.talk = "busy";
     this.render();
@@ -419,6 +435,7 @@ export class ControlPanel {
     const flag = this.flow.completeFollowUp(text);
     if (flag) {
       this.filed.push(flag);
+      playSfx("success");
       eventBus.emit("flag:created", flag);
       this.dispatch("unit_dispatched");
     }

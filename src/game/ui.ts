@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { playSfx } from "../audio";
 import { eventBus } from "../shared/eventBus";
 import type { SceneKey } from "../shared/types";
 
@@ -65,6 +66,7 @@ export function addSlider(
     const next = Math.round((min + ratio * (max - min)) / step) * step;
     if (next !== value) {
       value = next;
+      playSfx("blip");
       onChange(value);
     }
     show(value);
@@ -90,6 +92,7 @@ export function addButton(
       this.setColor("#4ade80");
     })
     .on("pointerdown", () => {
+      playSfx("click");
       onClick?.();
       eventBus.emit("scene:navigate", target);
     });

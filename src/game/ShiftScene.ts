@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { playSfx } from "../audio";
 import { eventBus } from "../shared/eventBus";
 import type { ShiftReport, WorldMap, WorldSnapshot } from "../shared/types";
 import { gazeController } from "../vision";
@@ -121,7 +122,10 @@ export class ShiftScene extends Phaser.Scene {
       })
       .setOrigin(1, 0)
       .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => this.endShift(false));
+      .on("pointerdown", () => {
+        playSfx("click");
+        this.endShift(false);
+      });
     if (this.level < LEVELS.length) {
       this.add
         .text(this.scale.width - MARGIN_X - 100, 10, "Skip level ▸", {
@@ -131,7 +135,10 @@ export class ShiftScene extends Phaser.Scene {
         })
         .setOrigin(1, 0)
         .setInteractive({ useHandCursor: true })
-        .on("pointerdown", () => this.skipLevel());
+        .on("pointerdown", () => {
+          playSfx("click");
+          this.skipLevel();
+        });
     }
     // Shows where the eye tracker thinks the player is looking.
     this.reticle = this.add
