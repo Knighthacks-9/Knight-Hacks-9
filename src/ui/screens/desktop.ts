@@ -255,6 +255,30 @@ export function buildDesktop(
     }
   }
 
+  const startItem = (
+    label: string,
+    iconName: keyof typeof ICONS,
+    run: () => void,
+  ) =>
+    h(
+      "li",
+      null,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "start-item",
+          onclick: () => {
+            playSfx("click");
+            closeMenu();
+            run();
+          },
+        },
+        icon(ICONS[iconName], "start-icon"),
+        label,
+      ),
+    );
+
   const menu = h(
     "nav",
     { class: "start-menu", hidden: true, "aria-label": "Start menu" },
@@ -262,63 +286,26 @@ export function buildDesktop(
     h(
       "ul",
       null,
-      ...[
-        ["Begin Shift", () => open("calibration")],
-        ["Gaze Setup", () => open("calibration")],
-        ["Watch Station", () => open("watch")],
-        ["Last Debrief", openLastDebrief],
-        ...fileOpeners,
-        ["Main Menu", () => open("desktop")],
-      ].map(([label, run]) =>
-        h(
-          "li",
-          null,
-          h(
-            "button",
-            {
-              type: "button",
-              class: "start-item",
-              onclick: () => {
-                playSfx("click");
-                closeMenu();
-                (run as () => void)();
-              },
-            },
-            label as string,
-          ),
-        ),
-      ),
+      startItem("Begin Shift", "play", () => open("calibration")),
+      startItem("Gaze Setup", "eye", () => open("calibration")),
+      startItem("Watch Station", "cctv", () => open("watch")),
+      startItem("Last Debrief", "chart", openLastDebrief),
+      ...fileOpeners.map(([label, run]) => startItem(label, "note", run)),
+      startItem("Main Menu", "window", () => open("desktop")),
       h("li", { class: "start-sep", role: "separator" }),
       h(
         "li",
         null,
-        h("a", { class: "start-item", href: "?ui=classic" }, "Classic Mode..."),
-      ),
-      h("li", { class: "start-sep", role: "separator" }),
-      ...(
-        [
-          ["Restart", "restart"],
-          ["Shut Down", "shutdown"],
-        ] as const
-      ).map(([label, mode]) =>
         h(
-          "li",
-          null,
-          h(
-            "button",
-            {
-              type: "button",
-              class: "start-item",
-              onclick: () => {
-                playSfx("click");
-                closeMenu();
-                power(mode);
-              },
-            },
-            label,
-          ),
+          "a",
+          { class: "start-item", href: "?ui=classic" },
+          icon(ICONS.crt, "start-icon"),
+          "Classic Mode...",
         ),
       ),
+      h("li", { class: "start-sep", role: "separator" }),
+      startItem("Restart", "restart", () => power("restart")),
+      startItem("Shut Down", "power", () => power("shutdown")),
     ),
   );
   const startButton = h(
@@ -392,8 +379,8 @@ export function buildDesktop(
     /** Closes everything the desktop itself opened (power off). */
     reset() {
       closeMenu();
-      readme?.destroy();
-      readme = null;
+      for (const file of openFiles.values()) file.destroy();
+      openFiles.clear();
       renderTasks();
     },
     setTask(label: string | null, toggle?: () => void) {

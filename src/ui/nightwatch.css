@@ -548,9 +548,11 @@ body.nw {
 }
 
 .start-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-  padding: 7px 14px;
+  padding: 3px 14px 3px 6px;
   background: none;
   border: 0;
   color: #111 !important;
@@ -565,6 +567,14 @@ body.nw {
   background: var(--title-a);
   color: #fff !important;
   outline: none;
+}
+
+/* 16px pixel art at exactly 2x keeps every pixel square. */
+.start-icon {
+  display: block;
+  flex: none;
+  width: 32px;
+  height: 32px;
 }
 
 .start-sep {
