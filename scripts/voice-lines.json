@@ -25,10 +25,22 @@
   },
   {
     "id": "report_received",
-    "text": "Copy that, control. Report received. We're sending someone over."
+    "text": "Copy that, control. Report received."
   },
   {
     "id": "stay_alert",
     "text": "Dispatch to control room. Quiet night so far. Stay alert."
+  },
+  {
+    "id": "describe_subject",
+    "text": "Control, describe the subject and what they are doing. Over."
+  },
+  {
+    "id": "unit_dispatched",
+    "text": "Copy that, control. A unit is on the way to investigate."
+  },
+  {
+    "id": "say_again",
+    "text": "Say again, control. We did not copy your last transmission."
   }
 ]

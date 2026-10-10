@@ -21,6 +21,32 @@ const BEHAVIOR_LABELS: Record<SuspiciousBehavior, string> = {
 const seconds = (value: number) => `${value.toFixed(1)}s`;
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 
+/** Report notes are transcribed player speech, so escape before inserting as HTML. */
+function escapeHtml(text: string): string {
+  return text.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        char
+      ]!,
+  );
+}
+
+/** "Reported as Loitering ✓ · “note”" for a filed report, or "" if none. */
+function reportDetails(
+  reported: SuspiciousBehavior | null | undefined,
+  actual: SuspiciousBehavior | null,
+  note: string | null | undefined,
+): string {
+  const parts: string[] = [];
+  if (reported) {
+    const verdict = actual === null ? "" : reported === actual ? " ✓" : " ✗";
+    parts.push(`Reported as ${BEHAVIOR_LABELS[reported]}${verdict}`);
+  }
+  if (note) parts.push(`“${escapeHtml(note)}”`);
+  return parts.length ? `<span class="meta">${parts.join(" · ")}</span>` : "";
+}
+
 /** HTML for the debrief panel. `cameraNames` maps camera ids to display names. */
 export function buildDebriefMarkup(
   report: ShiftReport,
@@ -38,15 +64,17 @@ export function buildDebriefMarkup(
           <span class="label">${BEHAVIOR_LABELS[event.behavior]}</span>
           <span class="pill ${event.outcome}">${OUTCOME_LABELS[event.outcome]}</span>
           <span class="meta">${event.cameraIds.map(name).join(", ")} · ${seconds(event.start)}–${event.end === null ? "end" : seconds(event.end)} · watched ${seconds(event.watchedSeconds)}</span>
+          ${reportDetails(event.reportedBehavior, event.behavior, event.reportNote)}
         </li>`,
     })),
     ...report.falseFlags.map((flag) => ({
       t: flag.t,
       html: `
         <li>
-          <span class="label">Flagged an innocent person</span>
+          <span class="label">Reported an innocent person</span>
           <span class="pill false-flag">${OUTCOME_LABELS["false-flag"]}</span>
           <span class="meta">${name(flag.cameraId)} · ${seconds(flag.t)}</span>
+          ${reportDetails(flag.behavior, null, flag.note)}
         </li>`,
     })),
   ]

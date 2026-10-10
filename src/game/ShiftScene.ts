@@ -1,38 +1,41 @@
 import Phaser from "phaser";
-import { startListening, type Transmission } from "../audio";
 import { eventBus } from "../shared/eventBus";
 import type { ShiftReport, WorldMap, WorldSnapshot } from "../shared/types";
 import { gazeController } from "../vision";
 import { startWorld, type WorldHandle } from "../world";
 import { CameraFeed } from "./CameraFeed";
+import { ControlPanel } from "./ControlPanel";
 import {
   FEED_LIMIT_KEY,
   LEVEL_KEY,
-  REPORT_KEY,
   LEVELS,
+  REPORT_KEY,
   SHIFT_SECONDS_KEY,
   clampShiftSeconds,
-  loadShiftSeconds,
   getFeedLayout,
+  loadShiftSeconds,
 } from "./levels";
 
 const GAP = 8;
 const MARGIN_X = 16;
 const MARGIN_TOP = 40;
 const MARGIN_BOTTOM = 12;
+/** Width of the REPORT / DISPATCH side panel on the right. */
+const PANEL_WIDTH = 200;
 /** Longest frame step fed to the sim, so a backgrounded tab doesn't jump ahead. */
 const MAX_DT = 0.1;
 
 /**
  * Runs a shift: owns the clock (sim:tick), shows the world's cameras, turns
- * the vision module's gaze point into the watched feed (gaze:sample), and
- * reports flags. Analytics answers shift:end with the debrief report.
+ * the vision module's gaze point into the watched feed (gaze:sample), and hosts
+ * the side panel where the player reports suspicious people and talks to
+ * dispatch. Analytics answers shift:end with the debrief report.
  */
 export class ShiftScene extends Phaser.Scene {
   private feeds: CameraFeed[] = [];
   private world: WorldHandle | null = null;
   private snapshot: WorldSnapshot | null = null;
-  private flagged = new Set<string>();
+  private panel!: ControlPanel;
   private t = 0;
   private level = 1;
   private shiftSeconds = 0;
@@ -40,8 +43,6 @@ export class ShiftScene extends Phaser.Scene {
   private hud!: Phaser.GameObjects.Text;
   private reticle!: Phaser.GameObjects.Arc;
   private transmittingText!: Phaser.GameObjects.Text;
-  private transmission: Transmission | null = null;
-  private transmissionStart = 0;
 
   constructor() {
     super("Shift");
@@ -50,7 +51,6 @@ export class ShiftScene extends Phaser.Scene {
   create(): void {
     this.feeds = [];
     this.snapshot = null;
-    this.flagged = new Set();
     this.t = 0;
     this.ended = false;
     this.level = (this.registry.get(LEVEL_KEY) as number | undefined) ?? 1;
@@ -66,9 +66,8 @@ export class ShiftScene extends Phaser.Scene {
     eventBus.on("world:snapshot", onSnapshot);
     eventBus.on("analytics:report", onReport);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      // A transmission still open when the shift ends is discarded.
-      void this.transmission?.stop();
-      this.transmission = null;
+      // An unfinished report or open transmission is dropped with the shift.
+      this.panel.destroy();
       this.world?.stop();
       this.world = null;
       eventBus.off("world:snapshot", onSnapshot);
@@ -82,7 +81,32 @@ export class ShiftScene extends Phaser.Scene {
     this.world = startWorld({ shiftSeconds: this.shiftSeconds });
     eventBus.off("world:map", onMap);
     if (!map) throw new Error("The world did not publish its map.");
-    this.buildFeeds(map);
+
+    const panelX = this.scale.width - MARGIN_X - PANEL_WIDTH;
+    this.buildFeeds(map, panelX - GAP);
+    const labels = new Map(
+      this.feeds.map((feed, i) => [
+        feed.camera.id,
+        `CAM ${i + 1} · ${feed.camera.name.toUpperCase()}`,
+      ]),
+    );
+    this.panel = new ControlPanel(
+      this,
+      panelX,
+      MARGIN_TOP,
+      PANEL_WIDTH,
+      this.scale.height - MARGIN_TOP - MARGIN_BOTTOM,
+      {
+        feedLabel: (cameraId) => labels.get(cameraId) ?? cameraId,
+        now: () => this.t,
+      },
+    );
+    // Clicking anywhere on a feed picks it in step 1 of a report. (Clicks on
+    // a person reach the panel first, through CameraFeed.)
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      const feed = this.feeds.find((f) => f.contains(pointer.x, pointer.y));
+      if (feed) this.panel.handleFeedClick(feed.camera.id);
+    });
 
     this.hud = this.add.text(MARGIN_X, 10, "", {
       color: "#9ca3af",
@@ -116,7 +140,7 @@ export class ShiftScene extends Phaser.Scene {
       .setDepth(10)
       .setVisible(false);
 
-    // Push-to-talk: hold Space to radio in, release to send.
+    // Push-to-talk: hold Space (or use the TALK button in DISPATCH).
     this.transmittingText = this.add
       .text(660, 10, "● TRANSMITTING", {
         color: "#ff5555",
@@ -128,8 +152,8 @@ export class ShiftScene extends Phaser.Scene {
     const talkKey = this.input.keyboard?.addKey(
       Phaser.Input.Keyboard.KeyCodes.SPACE,
     );
-    talkKey?.on("down", () => this.startTransmission());
-    talkKey?.on("up", () => void this.endTransmission());
+    talkKey?.on("down", () => !this.ended && this.panel.spaceDown());
+    talkKey?.on("up", () => this.panel.spaceUp());
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (talkKey) this.input.keyboard?.removeKey(talkKey, true);
     });
@@ -139,6 +163,7 @@ export class ShiftScene extends Phaser.Scene {
       shiftSeconds: this.shiftSeconds,
       cameraIds: this.feeds.map((feed) => feed.camera.id),
     });
+    this.panel.dispatch("shift_start");
   }
 
   update(_time: number, delta: number): void {
@@ -155,11 +180,16 @@ export class ShiftScene extends Phaser.Scene {
     const watched = point
       ? (this.feeds.find((feed) => feed.contains(px, py)) ?? null)
       : null;
+    const selection = this.panel.selection;
     for (const feed of this.feeds) {
-      feed.setWatched(feed === watched);
-      feed.update(this.snapshot, this.flagged, this.t);
+      feed.setHighlight(
+        feed === watched,
+        feed.camera.id === selection.cameraId,
+      );
+      feed.update(this.snapshot, this.panel.reported, selection.npcId, this.t);
     }
     this.reticle.setPosition(px, py).setVisible(source === "tracker");
+    this.transmittingText.setVisible(this.panel.isTransmitting);
     eventBus.emit("gaze:sample", {
       t: this.t,
       x: point?.x ?? null,
@@ -171,16 +201,16 @@ export class ShiftScene extends Phaser.Scene {
     if (this.t >= this.shiftSeconds) return this.endShift(true);
     const left = Math.ceil(this.shiftSeconds - this.t);
     this.hud.setText(
-      `NIGHT SHIFT  Level ${this.level} (${this.feeds.length} screens)  ${left}s left   Flags: ${this.flagged.size}   Gaze: ${source}`,
+      `NIGHT SHIFT  Level ${this.level} (${this.feeds.length} screens)  ${left}s left  Gaze: ${source}`,
     );
   }
 
-  private buildFeeds(map: WorldMap): void {
+  private buildFeeds(map: WorldMap, right: number): void {
     this.registry.set(FEED_LIMIT_KEY, map.cameras.length);
     const { screens, columns } = getFeedLayout(this.level, map.cameras.length);
     const rows = Math.ceil(screens / columns);
     const feedW = Math.floor(
-      (this.scale.width - 2 * MARGIN_X - (columns - 1) * GAP) / columns,
+      (right - MARGIN_X - (columns - 1) * GAP) / columns,
     );
     const feedH = Math.floor(
       (this.scale.height - MARGIN_TOP - MARGIN_BOTTOM - (rows - 1) * GAP) /
@@ -192,38 +222,9 @@ export class ShiftScene extends Phaser.Scene {
       const y = MARGIN_TOP + Math.floor(i / columns) * (feedH + GAP);
       this.feeds.push(
         new CameraFeed(this, x, y, feedW, feedH, camera, map, i, (npcId) =>
-          this.flag(camera.id, npcId),
+          this.panel.handlePersonClick(camera.id, npcId),
         ),
       );
-    });
-  }
-
-  private flag(cameraId: string, npcId: string): void {
-    if (this.ended || this.flagged.has(npcId)) return;
-    this.flagged.add(npcId);
-    eventBus.emit("flag:created", { t: this.t, npcId, cameraId });
-  }
-
-  private startTransmission(): void {
-    if (this.ended || this.transmission) return;
-    this.transmission = startListening();
-    this.transmissionStart = this.t;
-    this.transmittingText.setVisible(true);
-  }
-
-  private async endTransmission(): Promise<void> {
-    const transmission = this.transmission;
-    if (!transmission) return;
-    this.transmission = null;
-    this.transmittingText.setVisible(false);
-    const t = this.transmissionStart;
-    const text = await transmission.stop();
-    if (!text) return;
-    console.info(`[radio] ${text}`);
-    eventBus.emit("radio:report", {
-      text,
-      t,
-      provider: transmission.provider ?? "browser",
     });
   }
 

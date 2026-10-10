@@ -27,6 +27,8 @@ interface OpenEvent {
   cameraIds: Set<string>;
   watchedSeconds: number;
   flaggedAt: number | null;
+  reportedBehavior: ClassifiedEvent["reportedBehavior"];
+  reportNote: string | null;
 }
 
 export interface ShiftAnalytics {
@@ -119,6 +121,8 @@ export function createShiftAnalytics(): ShiftAnalytics {
         cameraIds: new Set(event.cameraIds.filter(shown)),
         watchedSeconds: 0,
         flaggedAt: null,
+        reportedBehavior: null,
+        reportNote: null,
       });
     },
 
@@ -141,7 +145,11 @@ export function createShiftAnalytics(): ShiftAnalytics {
         falseFlags.push({ ...flag });
         return;
       }
-      for (const event of matches) event.flaggedAt = flag.t;
+      for (const event of matches) {
+        event.flaggedAt = flag.t;
+        event.reportedBehavior = flag.behavior ?? null;
+        event.reportNote = flag.note ?? null;
+      }
     },
 
     endShift(end) {
@@ -163,6 +171,8 @@ export function createShiftAnalytics(): ShiftAnalytics {
                 : "missed-not-looking",
           watchedSeconds: round(event.watchedSeconds),
           flaggedAt: event.flaggedAt,
+          reportedBehavior: event.reportedBehavior,
+          reportNote: event.reportNote,
         }));
 
       const feeds: FeedStats[] = shift.cameraIds.map((cameraId) => {
