@@ -19,6 +19,22 @@ describe("world map", () => {
       expect(cam.visibleTiles.length).toBeGreaterThan(10);
   });
 
+  it("never shows the same hallway tile on both hall cameras", () => {
+    const cam = (id: string) => map.cameras.find((c) => c.id === id)!;
+    const east = new Set(cam("cam3").visibleTiles);
+    expect(cam("cam2").visibleTiles.filter((i) => east.has(i))).toEqual([]);
+  });
+
+  it("limits cameras 4, 5 and 6 to a 9x9 square", () => {
+    for (const id of ["cam4", "cam5", "cam6"]) {
+      const tiles = map.cameras.find((c) => c.id === id)!.visibleTiles;
+      const xs = tiles.map((i) => i % map.width);
+      const ys = tiles.map((i) => Math.floor(i / map.width));
+      expect(Math.max(...xs) - Math.min(...xs) + 1).toBe(9);
+      expect(Math.max(...ys) - Math.min(...ys) + 1).toBe(9);
+    }
+  });
+
   it("connects both exits to every room", () => {
     for (const exit of EXITS) {
       for (const r of map.rooms) {
