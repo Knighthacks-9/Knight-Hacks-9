@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GazeFeatures } from "./gazeFeatures";
-import { GAZE_FEATURE_KEYS, type GazeModel } from "./gazeModel";
+import { DESIGN_KEYS, type GazeModel } from "./gazeModel";
 import {
   DEFAULT_GAZE_SETTINGS,
   GazeController,
@@ -9,13 +9,19 @@ import {
 import { OneEuroFilter } from "./oneEuroFilter";
 
 // Screen x = 0.5 - eyeX and screen y = 0.5 + eyeY, with everything else ignored.
+// Design terms: geometry, eyeX, eyeY, openness.
+const axis = (weights: number[]) => ({
+  eyeGain: 3,
+  alpha: 0.1,
+  mean: DESIGN_KEYS.map(() => 0),
+  scale: DESIGN_KEYS.map(() => 1),
+  weights,
+});
 const MODEL: GazeModel = {
-  features: [...GAZE_FEATURE_KEYS],
-  mean: GAZE_FEATURE_KEYS.map(() => 0),
-  scale: GAZE_FEATURE_KEYS.map(() => 1),
-  weightsX: [0.5, -1, 0, 0, 0, 0, 0, 0],
-  weightsY: [0.5, 0, 1, 0, 0, 0, 0, 0],
-  alpha: 0.01,
+  version: 3,
+  refScale: 0.12,
+  x: axis([0.5, 0, -1, 0, 0]),
+  y: axis([0.5, 0, 0, 1, 0]),
   validation: [],
 };
 

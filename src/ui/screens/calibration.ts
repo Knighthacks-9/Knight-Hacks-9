@@ -1,14 +1,19 @@
 // Screen 2: GAZE_CALIBRATION.EXE. Pointer tuning, webcam control, the
-// nine-point calibration, a gaze test, and a debug overlay.
+// 13-point calibration, a gaze test with click-to-correct, and a debug overlay.
 //
 // Calibration uses the real eye-tracking pipeline (src/vision) when the
 // webcam is tracking. Without a webcam it runs a pointer calibration: the
 // player clicks each target, which measures pointer accuracy only.
 import { playSfx } from "../../audio";
 import {
+  checkHeadAlignment,
+  clearGazeCorrection,
   fitGazeModel,
   gazeController,
+  headGuide,
   mediaPipeGazeTracker,
+  predictUncorrectedGaze,
+  refineGazeModel,
   saveGazeModel,
   validationErrorPx,
   type CalibrationSample,
@@ -20,8 +25,8 @@ import { clamp, h } from "../dom";
 import type { CalibrationSettings } from "../service";
 import { openFloatingWindow } from "../window";
 
-// The nine targets, center first, then around the edge so the eyes never
-// cross the whole screen (same order as the vision module's calibration).
+// Center first, then around the edge so the eyes never cross the whole
+// screen, then four inner points for the middle, where most feeds sit.
 const TARGETS: (GazePoint & { name: string })[] = [
   { x: 0.5, y: 0.5, name: "Center" },
   { x: 0.08, y: 0.1, name: "Top-left" },
@@ -32,13 +37,35 @@ const TARGETS: (GazePoint & { name: string })[] = [
   { x: 0.5, y: 0.9, name: "Bottom-center" },
   { x: 0.08, y: 0.9, name: "Bottom-left" },
   { x: 0.08, y: 0.5, name: "Center-left" },
+  { x: 0.3, y: 0.3, name: "Inner top-left" },
+  { x: 0.7, y: 0.3, name: "Inner top-right" },
+  { x: 0.7, y: 0.7, name: "Inner bottom-right" },
+  { x: 0.3, y: 0.7, name: "Inner bottom-left" },
 ];
+// Head sweep: eyes stay on each dot while the head turns and nods. Kept
+// clear of TARGETS so each sweep is its own calibration point.
+const SWEEPS: (GazePoint & { name: string })[] = [
+  { x: 0.5, y: 0.45, name: "Sweep center" },
+  { x: 0.25, y: 0.62, name: "Sweep left" },
+  { x: 0.75, y: 0.62, name: "Sweep right" },
+];
+/** How long the face must stay in view before calibration starts by itself. */
+const ALIGN_HOLD_MS = 1500;
 const INTRO_MS = 1800;
+const SWEEP_INTRO_MS = 3200;
+/** Head movement wanted per sweep, in radians from one extreme to the other. */
+const SWEEP_YAW = 0.3;
+const SWEEP_PITCH = 0.18;
+const SWEEP_MIN_MS = 3000;
+const SWEEP_MAX_MS = 10000;
 const MOVE_MS = 500;
 const SETTLE_MS = 500;
-const COLLECT_MS = 1000;
-const MIN_POINT_SAMPLES = 12;
+const COLLECT_MS = 1200;
+const MIN_POINT_SAMPLES = 15;
 const STALL_WARNING_MS = 3000;
+/** Click-to-correct: frames gathered while the player keeps looking. */
+const REFINE_MS = 700;
+const MIN_REFINE_FRAMES = 6;
 
 const TRACKING: TrackerPhase[] = ["running", "no-face", "no-eyes"];
 const STARTING: TrackerPhase[] = ["requesting", "loading"];
@@ -214,7 +241,7 @@ export const mountCalibration: Screen = (ctx) => {
               class: "btn-dark btn-wide",
               onclick: () => startCalibration(),
             },
-            "START 9-POINT CALIBRATION",
+            `START ${TARGETS.length}-POINT CALIBRATION`,
           ),
           h(
             "button",
@@ -315,6 +342,13 @@ export const mountCalibration: Screen = (ctx) => {
     if (phase === "error") return { text: "WEBCAM ERROR", tone: "error" };
     if (phase === "no-face") return { text: "FACE NOT DETECTED", tone: "warn" };
     if (phase === "no-eyes") return { text: "EYES NOT TRACKED", tone: "warn" };
+    const alignment = mediaPipeGazeTracker.getAlignment();
+    if (phase === "running" && !alignment.aligned) {
+      return {
+        text: `ALIGN HEAD · ${alignment.hint.toUpperCase()}`,
+        tone: "warn",
+      };
+    }
     if (source === "tracker")
       return { text: "EYE TRACKING ACTIVE", tone: "ok" };
     if (phase === "running") {
@@ -360,8 +394,9 @@ export const mountCalibration: Screen = (ctx) => {
 
     const model = gazeController.getModel();
     const pointerError = model ? undefined : settings.estimatedErrorPx;
+    const clicks = model?.correction?.points.length ?? 0;
     calibInfo.textContent = model
-      ? `Eye calibration · est. error ≈ ${Math.round(validationErrorPx(model, innerWidth, innerHeight))} px (${quality(validationErrorPx(model, innerWidth, innerHeight)).toLowerCase()})`
+      ? `Eye calibration · est. error ≈ ${Math.round(validationErrorPx(model, innerWidth, innerHeight))} px (${quality(validationErrorPx(model, innerWidth, innerHeight)).toLowerCase()})${clicks ? ` · fine-tuned with ${clicks} click${clicks === 1 ? "" : "s"}` : " · fine-tune it in TEST GAZE"}`
       : pointerError !== undefined
         ? `Pointer calibration · error ≈ ${Math.round(pointerError)} px${settings.mouseFallback ? " · mouse fallback available" : ""}`
         : `Not calibrated${settings.mouseFallback ? " · mouse fallback available" : " · no gaze source"}`;
@@ -497,7 +532,7 @@ export const mountCalibration: Screen = (ctx) => {
 };
 
 // ---------------------------------------------------------------------------
-// Nine-point calibration overlay
+// Calibration overlay
 // ---------------------------------------------------------------------------
 
 interface CalibrationResult {
@@ -531,13 +566,9 @@ function runCalibration(
     { class: "calib-instructions" },
     mode === "pointer"
       ? "No webcam: pointer calibration. Click each target as it appears."
-      : "Follow the dot with your eyes. Look at it the way you normally look at the screen.",
+      : "Follow the dot with your eyes. Sit naturally; small head movements are fine.",
   );
-  const warning = h(
-    "p",
-    { class: "calib-warning", hidden: true },
-    "Can't see your eyes clearly. Face the camera, keep your eyes open, and add light if you can.",
-  );
+  const warning = h("p", { class: "calib-warning", hidden: true });
   const cancel = h(
     "button",
     {
@@ -553,7 +584,7 @@ function runCalibration(
       class: "calib-overlay",
       role: "dialog",
       "aria-modal": "true",
-      "aria-label": "Nine-point calibration",
+      "aria-label": "Gaze calibration",
     },
     instructions,
     warning,
@@ -572,11 +603,15 @@ function runCalibration(
     progress.textContent = `${Math.min(index + 1, TARGETS.length)} / ${TARGETS.length} · ${TARGETS[Math.min(index, TARGETS.length - 1)].name}`;
   };
 
+  let releaseAlign = () => {};
+  let onPhaseKey: ((event: KeyboardEvent) => void) | null = null;
+
   function stop(cancelled: boolean): void {
     if (ended) return;
     ended = true;
     cancelAnimationFrame(raf);
     window.removeEventListener("keydown", onKey);
+    releaseAlign();
     if (cancelled) {
       playSfx("cancel");
       onCancel();
@@ -586,7 +621,9 @@ function runCalibration(
     if (event.key === "Escape") {
       event.preventDefault();
       stop(true);
+      return;
     }
+    onPhaseKey?.(event);
   }
   window.addEventListener("keydown", onKey);
 
@@ -634,36 +671,117 @@ function runCalibration(
     };
   }
 
-  // Webcam: each point glides in, settles, then records about a second of frames.
-  let phase: "intro" | "move" | "settle" | "collect" = "intro";
+  // Webcam: first the player gets their face in view (calibration starts by
+  // itself once they hold still, or at once with SPACE). Each point then
+  // glides in, settles, and records about a second of frames. Last, a head
+  // sweep: eyes stay on a dot while the head turns and nods, which teaches
+  // the model how this player's eyes and head share the work, so gaze keeps
+  // up when the head moves later.
+  const steps = [
+    ...TARGETS.map((t) => ({ ...t, sweep: false })),
+    ...SWEEPS.map((t) => ({ ...t, sweep: true })),
+  ];
+  let phase: "align" | "intro" | "sweep-intro" | "move" | "settle" | "collect" =
+    "align";
   let phaseStart = performance.now();
+  let alignedSince: number | null = null;
+  let framed = false;
   let pointSamples = 0;
   let lastFrame = -1;
+  let range = { yaw: [Infinity, -Infinity], pitch: [Infinity, -Infinity] };
   const samples: CalibrationSample[] = [];
+  const sweepHint = h("p", {
+    class: "calib-sweep-hint",
+    "aria-live": "polite",
+    hidden: true,
+  });
+  overlay.insertBefore(sweepHint, cancel);
+  const begin = (now: number): boolean => {
+    if (phase !== "align" || !gazeController.getTrackerFeatures()) return false;
+    playSfx("capture");
+    align.release();
+    align.panel.remove();
+    instructions.hidden = false;
+    enter("intro", now);
+    return true;
+  };
+  const align = createAlignMonitor(() => {
+    if (!begin(performance.now())) playSfx("deny");
+  });
+  overlay.insertBefore(align.panel, cancel);
+  releaseAlign = align.release;
+  onPhaseKey = (event) => {
+    if (phase !== "align" || event.key !== " ") return;
+    event.preventDefault();
+    if (!begin(performance.now())) playSfx("deny");
+  };
+  instructions.hidden = true;
   target.hidden = true;
   progress.textContent = "ESC to cancel";
+  const showStep = () => {
+    const step = steps[index];
+    progress.textContent = step.sweep
+      ? `Head sweep ${index - TARGETS.length + 1} / ${SWEEPS.length} · eyes on the dot`
+      : `${index + 1} / ${TARGETS.length} · ${step.name}`;
+  };
   const enter = (next: typeof phase, now: number) => {
     phase = next;
     phaseStart = now;
     pointSamples = 0;
+    range = { yaw: [Infinity, -Infinity], pitch: [Infinity, -Infinity] };
     target.style.setProperty("--collect", "0");
-    warning.hidden = true;
+    showWarning(null);
+  };
+  const showWarning = (text: string | null) => {
+    if (text && warning.hidden) playSfx("warning");
+    warning.hidden = !text;
+    if (text && warning.textContent !== text) warning.textContent = text;
+  };
+  const showSweepHint = (text: string | null) => {
+    sweepHint.hidden = !text;
+    if (text && sweepHint.textContent !== text) sweepHint.textContent = text;
   };
 
   const tick = (now: number) => {
     raf = requestAnimationFrame(tick);
     const elapsed = now - phaseStart;
-    const goal = TARGETS[index];
-    if (phase === "intro") {
-      if (elapsed < INTRO_MS) return;
+    const goal = steps[index];
+    const features = gazeController.getTrackerFeatures();
+    // Only "is the face in view" matters now; the model handles movement.
+    const framing = checkHeadAlignment(features, framed);
+    framed = framing.aligned;
+
+    if (phase === "align") {
+      const tracking = mediaPipeGazeTracker.getStatus().phase;
+      const ready = tracking === "running" && framed;
+      alignedSince = ready ? (alignedSince ?? now) : null;
+      const held =
+        alignedSince === null
+          ? 0
+          : Math.min((now - alignedSince) / ALIGN_HOLD_MS, 1);
+      align.update(
+        features,
+        ready,
+        held,
+        ready
+          ? "Good · hold still"
+          : tracking === "no-face"
+            ? "Face not detected"
+            : tracking === "no-eyes"
+              ? "Keep both eyes visible"
+              : framing.hint,
+      );
+      if (held >= 1) begin(now);
+    } else if (phase === "intro" || phase === "sweep-intro") {
+      if (elapsed < (phase === "intro" ? INTRO_MS : SWEEP_INTRO_MS)) return;
       instructions.hidden = true;
       target.hidden = false;
       place(goal);
-      showProgress();
+      showStep();
       playSfx("tick");
       enter("settle", now);
     } else if (phase === "move") {
-      const prev = TARGETS[index - 1];
+      const prev = steps[index - 1];
       const k = Math.min(elapsed / MOVE_MS, 1);
       const ease = 0.5 - Math.cos(Math.PI * k) / 2;
       place({
@@ -675,11 +793,14 @@ function runCalibration(
         enter("settle", now);
       }
     } else if (phase === "settle") {
+      if (goal.sweep) {
+        showSweepHint("Keep your eyes on the dot");
+      }
       if (elapsed >= SETTLE_MS) enter("collect", now);
     } else {
-      const features = gazeController.getTrackerFeatures();
       if (
         features &&
+        framed &&
         !features.blink &&
         features.timestamp >= phaseStart &&
         features.timestamp !== lastFrame
@@ -687,28 +808,70 @@ function runCalibration(
         lastFrame = features.timestamp;
         samples.push({ features, target: { x: goal.x, y: goal.y } });
         pointSamples += 1;
+        range.yaw = [
+          Math.min(range.yaw[0], features.yaw),
+          Math.max(range.yaw[1], features.yaw),
+        ];
+        range.pitch = [
+          Math.min(range.pitch[0], features.pitch),
+          Math.max(range.pitch[1], features.pitch),
+        ];
       }
-      const k = Math.min(
-        elapsed / COLLECT_MS,
-        pointSamples / MIN_POINT_SAMPLES,
-        1,
-      );
+
+      let k: number;
+      let done: boolean;
+      if (goal.sweep) {
+        // Done once the head has turned and nodded enough; after a while,
+        // move on with whatever movement there was.
+        const turn = Math.max(0, range.yaw[1] - range.yaw[0]) / SWEEP_YAW;
+        const nod = Math.max(0, range.pitch[1] - range.pitch[0]) / SWEEP_PITCH;
+        k = Math.min(elapsed / SWEEP_MIN_MS, turn, nod, 1);
+        done =
+          pointSamples >= MIN_POINT_SAMPLES &&
+          (k >= 1 || elapsed >= SWEEP_MAX_MS);
+        showSweepHint(
+          turn < 1
+            ? "Eyes on the dot · slowly turn your head left and right ↔"
+            : nod < 1
+              ? "Eyes on the dot · now slowly nod up and down ↕"
+              : "Good · keep looking at the dot",
+        );
+      } else {
+        k = Math.min(elapsed / COLLECT_MS, pointSamples / MIN_POINT_SAMPLES, 1);
+        done = elapsed >= COLLECT_MS && pointSamples >= MIN_POINT_SAMPLES;
+      }
       target.style.setProperty("--collect", k.toFixed(2));
       const stalled =
         elapsed > STALL_WARNING_MS && pointSamples < MIN_POINT_SAMPLES;
-      if (stalled && warning.hidden) playSfx("warning");
-      warning.hidden = !stalled;
-      if (elapsed >= COLLECT_MS && pointSamples >= MIN_POINT_SAMPLES) {
-        index += 1;
-        if (index >= TARGETS.length) {
-          stop(false);
-          finishWebcam();
-          return;
-        }
-        playSfx("capture");
-        showProgress();
-        enter("move", now);
+      showWarning(
+        features && !framed
+          ? `Keep your face in view of the camera: ${framing.hint.toLowerCase()}.`
+          : stalled
+            ? "Can't see your eyes clearly. Face the camera, keep your eyes open, and add light if you can."
+            : null,
+      );
+      if (!done) return;
+
+      index += 1;
+      showSweepHint(null);
+      if (index >= steps.length) {
+        stop(false);
+        finishWebcam();
+        return;
       }
+      playSfx("capture");
+      if (steps[index].sweep && !goal.sweep) {
+        // Explain the head sweep before it starts.
+        target.hidden = true;
+        progress.textContent = "Head sweep";
+        instructions.textContent =
+          "Almost done. Keep your eyes on the dot while you slowly turn your head left and right, then nod up and down.";
+        instructions.hidden = false;
+        enter("sweep-intro", now);
+        return;
+      }
+      showStep();
+      enter("move", now);
     }
   };
   raf = requestAnimationFrame(tick);
@@ -737,6 +900,129 @@ function runCalibration(
   return () => {
     stop(false);
     overlay.remove();
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Head alignment monitor: a large mirrored camera view with the head guide and
+// a marker for where the player's eyes are now.
+// ---------------------------------------------------------------------------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function createAlignMonitor(onLock: () => void) {
+  const svg = <K extends keyof SVGElementTagNameMap>(tag: K, cls: string) => {
+    const element = document.createElementNS(SVG_NS, tag);
+    element.setAttribute("class", cls);
+    return element;
+  };
+  const stream = mediaPipeGazeTracker.getStream();
+  const video = h("video", {
+    class: "calib-align-video",
+    "aria-hidden": "true",
+  });
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+  void video.play().catch(() => {});
+
+  const overlay = svg("svg", "calib-align-overlay");
+  overlay.setAttribute("aria-hidden", "true");
+  const guide = svg("ellipse", "calib-align-guide");
+  const eyeLine = svg("line", "calib-align-eyes");
+  const trail = svg("line", "calib-align-trail");
+  const marker = svg("circle", "calib-align-marker");
+  marker.setAttribute("r", "12");
+  overlay.append(guide, eyeLine, trail, marker);
+
+  const monitor = h("div", { class: "calib-align-monitor" }, video, overlay);
+  const hint = h("p", {
+    class: "calib-align-hint",
+    role: "status",
+    "aria-live": "polite",
+  });
+  const meter = h(
+    "div",
+    { class: "calib-align-meter", "aria-hidden": "true" },
+    h("i"),
+  );
+  const panel = h(
+    "div",
+    { class: "calib-align" },
+    h("h2", { class: "pixel-title" }, "GET COMFORTABLE"),
+    h(
+      "p",
+      { class: "calib-sub" },
+      "Sit the way you will play, facing the screen. The outline is only a guide: calibration starts once your face is in view and still. You can move your head naturally afterwards.",
+    ),
+    monitor,
+    hint,
+    meter,
+    h(
+      "button",
+      {
+        type: "button",
+        class: "btn-dark",
+        onclick: () => onLock(),
+      },
+      "START NOW (SPACE)",
+    ),
+  );
+
+  const settings = stream?.getVideoTracks()[0]?.getSettings();
+  let width = settings?.width ?? 1280;
+  let height = settings?.height ?? 720;
+  let target = headGuide(width, height);
+  const layout = () => {
+    target = headGuide(width, height);
+    monitor.style.aspectRatio = `${width} / ${height}`;
+    overlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    guide.setAttribute("cx", String(target.cx));
+    guide.setAttribute("cy", String(target.cy));
+    guide.setAttribute("rx", String(target.rx));
+    guide.setAttribute("ry", String(target.ry));
+    eyeLine.setAttribute("x1", String(target.cx - target.rx * 0.75));
+    eyeLine.setAttribute("x2", String(target.cx + target.rx * 0.75));
+    eyeLine.setAttribute("y1", String(target.eyeY));
+    eyeLine.setAttribute("y2", String(target.eyeY));
+  };
+  video.addEventListener("loadedmetadata", () => {
+    if (!video.videoWidth || !video.videoHeight) return;
+    width = video.videoWidth;
+    height = video.videoHeight;
+    layout();
+  });
+  layout();
+
+  return {
+    panel,
+    update(
+      features: { faceX: number; faceY: number } | null,
+      aligned: boolean,
+      held: number,
+      text: string,
+    ): void {
+      monitor.dataset.aligned = String(aligned);
+      hint.dataset.tone = aligned ? "ok" : "warn";
+      if (hint.textContent !== text) hint.textContent = text;
+      meter.style.setProperty("--hold", held.toFixed(2));
+      const shown = features !== null;
+      marker.setAttribute("visibility", shown ? "visible" : "hidden");
+      trail.setAttribute("visibility", shown ? "visible" : "hidden");
+      if (!features) return;
+      const x = String(features.faceX * width);
+      const y = String(features.faceY * height);
+      marker.setAttribute("cx", x);
+      marker.setAttribute("cy", y);
+      trail.setAttribute("x1", x);
+      trail.setAttribute("y1", y);
+      trail.setAttribute("x2", String(target.cx));
+      trail.setAttribute("y2", String(target.eyeY));
+    },
+    release(): void {
+      video.pause();
+      video.srcObject = null;
+    },
   };
 }
 
@@ -785,7 +1071,7 @@ function showResult(
         "p",
         { class: "calib-sub" },
         result.ok && result.errorPx !== null
-          ? `${result.mode === "webcam" ? "Estimated gaze error" : "Pointer error"} ≈ ${Math.round(result.errorPx)} px · 9 / 9 points`
+          ? `${result.mode === "webcam" ? "Estimated gaze error" : "Pointer error"} ≈ ${Math.round(result.errorPx)} px · ${result.mode === "webcam" ? `${TARGETS.length} points + head sweep` : `${TARGETS.length} / ${TARGETS.length} points`}`
           : "The calibration could not be fitted. Add light, sit centered, and try again.",
       ),
       result.mode === "pointer"
@@ -794,7 +1080,13 @@ function showResult(
             { class: "calib-small" },
             "Pointer calibration measures click accuracy only. Enable the webcam for eye tracking.",
           )
-        : null,
+        : result.ok
+          ? h(
+              "p",
+              { class: "calib-small" },
+              "Not quite where you look? In TEST GAZE, look at a spot and click it to fine-tune.",
+            )
+          : null,
       map,
       h(
         "div",
@@ -821,6 +1113,8 @@ function showResult(
 
 // ---------------------------------------------------------------------------
 // Gaze test: six stand-in feeds; the one under the gaze point lights up.
+// With eye tracking on, a cursor shows the estimated gaze, and clicking a spot
+// while looking at it fine-tunes the calibration (saved with it).
 // ---------------------------------------------------------------------------
 
 function runGazeTest(
@@ -831,6 +1125,35 @@ function runGazeTest(
     h("div", { class: "test-panel" }, h("span", null, `CAM ${i + 1}`)),
   );
   const hint = h("p", { class: "calib-small", "aria-live": "polite" });
+  const cursor = h("div", {
+    class: "gaze-cursor",
+    "aria-hidden": "true",
+    hidden: true,
+  });
+  const resetClicks = h(
+    "button",
+    {
+      type: "button",
+      class: "btn-dark",
+      onclick: () => {
+        const current = gazeController.getModel();
+        if (!current?.correction) return;
+        playSfx("click");
+        gazeController.setModel(clearGazeCorrection(current));
+        saveGazeModel(gazeController.getModel());
+        note = "Click corrections cleared.";
+      },
+    },
+    "RESET CLICKS",
+  );
+  let note = "";
+  let capture: {
+    target: GazePoint;
+    start: number;
+    lastFrame: number;
+    predictions: GazePoint[];
+    mark: HTMLElement;
+  } | null = null;
   const markers = h("div", {
     class: "calib-map test-validation",
     "aria-hidden": "true",
@@ -871,10 +1194,12 @@ function runGazeTest(
     hint,
     h("div", { class: "test-grid" }, ...panels),
     markers,
+    cursor,
     h(
       "div",
       { class: "calib-actions" },
       back,
+      resetClicks,
       h(
         "button",
         {
@@ -889,19 +1214,94 @@ function runGazeTest(
   ctx.overlay.append(overlay);
   back.focus();
 
+  // Click-to-correct: the player looks at a spot and clicks it, then keeps
+  // looking while a ring closes; the model's estimates over that time are
+  // paired with the spot.
+  overlay.addEventListener("click", (event) => {
+    if ((event.target as Element).closest("button") || capture) return;
+    if (!gazeController.getModel() || !gazeController.getTrackerFeatures()) {
+      playSfx("deny");
+      note = "Fine-tuning needs eye tracking: enable the webcam and calibrate.";
+      return;
+    }
+    const box = ctx.root.getBoundingClientRect();
+    const target = {
+      x: clamp((event.clientX - box.left) / box.width, 0, 1),
+      y: clamp((event.clientY - box.top) / box.height, 0, 1),
+    };
+    const mark = h("i", {
+      class: "refine-mark",
+      "aria-hidden": "true",
+      style: `left:${target.x * 100}%;top:${target.y * 100}%;--refine-ms:${REFINE_MS}ms`,
+    });
+    overlay.append(mark);
+    playSfx("tick");
+    capture = {
+      target,
+      start: performance.now(),
+      lastFrame: -1,
+      predictions: [],
+      mark,
+    };
+  });
+
+  function updateCapture(now: number): void {
+    if (!capture) return;
+    const model = gazeController.getModel();
+    const features = gazeController.getTrackerFeatures();
+    if (
+      model &&
+      features &&
+      !features.blink &&
+      features.timestamp >= capture.start &&
+      features.timestamp !== capture.lastFrame
+    ) {
+      capture.lastFrame = features.timestamp;
+      capture.predictions.push(predictUncorrectedGaze(model, features));
+    }
+    if (now - capture.start < REFINE_MS) return;
+    const { target, predictions, mark } = capture;
+    capture = null;
+    mark.remove();
+    if (!model || predictions.length < MIN_REFINE_FRAMES) {
+      playSfx("deny");
+      note = "Couldn't see your eyes for that click. Try again.";
+      return;
+    }
+    const predicted = {
+      x: predictions.reduce((sum, p) => sum + p.x, 0) / predictions.length,
+      y: predictions.reduce((sum, p) => sum + p.y, 0) / predictions.length,
+    };
+    const refined = refineGazeModel(model, { target, predicted });
+    gazeController.setModel(refined);
+    saveGazeModel(refined);
+    playSfx("capture");
+    const count = refined.correction?.points.length ?? 0;
+    note = `Fine-tuned with ${count} click${count === 1 ? "" : "s"}. Clicks spread around the screen work best.`;
+  }
+
   let active = -1;
   let raf = 0;
   const loop = (now: number) => {
     raf = requestAnimationFrame(loop);
+    updateCapture(now);
     const point = gazeController.getPoint(now);
     const source = gazeController.getSource(now);
-    hint.textContent =
+    const text =
       source === "tracker"
-        ? "Eye tracking active."
+        ? note ||
+          "Cursor off? Look at any spot, click it, and keep looking until the ring closes."
         : source === "mouse"
           ? "Using the mouse as gaze (eyes not tracked)."
           : "No gaze source. Turn on mouse fallback or enable the webcam.";
+    if (hint.textContent !== text) hint.textContent = text;
+    resetClicks.hidden = !gazeController.getModel()?.correction;
     markers.hidden = !actions.debug();
+    const overlayBox = overlay.getBoundingClientRect();
+    cursor.hidden = !point || source !== "tracker";
+    if (point && source === "tracker") {
+      cursor.style.transform = `translate(${point.x * overlayBox.width}px, ${point.y * overlayBox.height}px)`;
+    }
     let next = -1;
     if (point) {
       const box = ctx.root.getBoundingClientRect();

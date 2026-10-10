@@ -13,13 +13,26 @@ export {
 } from "./gazeController";
 export type { GazeFeatures } from "./gazeFeatures";
 export {
+  HEAD_TARGET,
+  checkHeadAlignment,
+  headGuide,
+  type AlignmentIssue,
+  type HeadAlignment,
+  type HeadPosition,
+} from "./headAlignment";
+export {
   MIN_CALIBRATION_POINTS,
+  clearGazeCorrection,
   fitGazeModel,
   loadGazeModel,
   predictGaze,
+  predictUncorrectedGaze,
+  refineGazeModel,
   saveGazeModel,
   validationErrorPx,
   type CalibrationSample,
+  type GazeAxisModel,
+  type GazeCorrection,
   type GazeModel,
   type GazeValidationPoint,
 } from "./gazeModel";

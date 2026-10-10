@@ -964,6 +964,161 @@ body.nw {
   right: 16px;
 }
 
+/* Head alignment step before webcam calibration. */
+.calib-align {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 64px 24px 24px;
+  text-align: center;
+}
+
+.calib-align .pixel-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.calib-align .calib-sub {
+  max-width: 620px;
+  font-size: 20px;
+}
+
+.calib-align-monitor {
+  position: relative;
+  width: min(620px, 100%, calc((100vh - 330px) * 4 / 3));
+  min-width: 240px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #05070a;
+  border: 2px solid;
+  border-color: var(--hi) var(--shadow) var(--shadow) var(--hi);
+  box-shadow:
+    inset -1px -1px 0 var(--lo),
+    inset 1px 1px 0 #fff,
+    0 0 0 6px var(--chrome),
+    0 0 0 8px var(--shadow);
+  margin: 8px;
+}
+
+.calib-align-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  filter: contrast(1.06) saturate(0.8);
+}
+
+.calib-align-monitor::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.22) 0 1px,
+      transparent 1px 3px
+    ),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.5));
+}
+
+.calib-align-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(-1);
+}
+
+.calib-align-guide {
+  fill: rgba(242, 193, 78, 0.06);
+  stroke: var(--amber-text);
+  stroke-width: 4;
+  stroke-dasharray: 16 10;
+  vector-effect: non-scaling-stroke;
+}
+
+.calib-align-eyes {
+  stroke: var(--amber-text);
+  stroke-width: 2;
+  stroke-dasharray: 6 8;
+  opacity: 0.75;
+  vector-effect: non-scaling-stroke;
+}
+
+.calib-align-trail {
+  stroke: rgba(242, 193, 78, 0.6);
+  stroke-width: 2;
+  stroke-dasharray: 2 6;
+  vector-effect: non-scaling-stroke;
+}
+
+.calib-align-marker {
+  fill: none;
+  stroke: var(--amber-text);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.calib-align-monitor[data-aligned="true"] .calib-align-guide {
+  fill: rgba(127, 224, 160, 0.1);
+  stroke: var(--green-text);
+  stroke-dasharray: none;
+}
+
+.calib-align-monitor[data-aligned="true"]
+  :is(.calib-align-eyes, .calib-align-marker) {
+  stroke: var(--green-text);
+}
+
+.calib-align-monitor[data-aligned="true"] .calib-align-trail {
+  visibility: hidden;
+}
+
+.calib-align-hint {
+  min-width: 300px;
+  margin: 0;
+  padding: 9px 16px;
+  background: #2c2410;
+  border: 2px solid #6b5418;
+  color: var(--amber-text);
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.calib-align-hint[data-tone="ok"] {
+  background: #12291f;
+  border-color: #2f6b4a;
+  color: var(--green-text);
+}
+
+/* Fills while the head holds alignment; calibration starts when it is full. */
+.calib-align-meter {
+  width: min(300px, 80%);
+  height: 14px;
+  padding: 2px;
+  background: var(--screen);
+  border: 2px solid var(--screen-line);
+}
+
+.calib-align-meter i {
+  display: block;
+  width: calc(var(--hold, 0) * 100%);
+  height: 100%;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--green) 0 8px,
+    transparent 8px 10px
+  );
+}
+
 .calib-result {
   display: grid;
   place-items: center;
@@ -1067,6 +1222,60 @@ body.nw {
   background: none;
   border: 0;
   pointer-events: none;
+}
+
+/* Head sweep instructions, above the dot. */
+.calib-sweep-hint {
+  position: absolute;
+  left: 50%;
+  top: 14%;
+  transform: translateX(-50%);
+  max-width: 90%;
+  margin: 0;
+  padding: 10px 18px;
+  background: #2c2410;
+  border: 2px solid #6b5418;
+  color: var(--amber-text);
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* Click-to-correct: a ring that closes while the player keeps looking. */
+.refine-mark {
+  position: absolute;
+  z-index: 1250;
+  width: 56px;
+  height: 56px;
+  margin: -28px;
+  border: 3px solid var(--green-text);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: refine-close var(--refine-ms, 700ms) linear forwards;
+}
+
+.refine-mark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+  background: var(--green-text);
+}
+
+@keyframes refine-close {
+  to {
+    transform: scale(0.2);
+    border-color: #fff;
+  }
+}
+
+.test-overlay {
+  cursor: crosshair;
 }
 
 .test-overlay > .calib-actions {

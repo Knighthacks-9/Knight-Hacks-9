@@ -11,6 +11,13 @@ import {
 } from "./gazeFeatures";
 import { playSfx } from "../audio/sfx";
 import { gazeController } from "./gazeController";
+import {
+  NOT_ALIGNED,
+  checkHeadAlignment,
+  headGuide,
+  type HeadAlignment,
+} from "./headAlignment";
+import "./cameraPreview.css";
 
 export type TrackerPhase =
   | "idle"
@@ -88,19 +95,27 @@ function savePreviewHidden(hidden: boolean): void {
   }
 }
 
-function previewButton(label: string): HTMLButtonElement {
+function previewButton(
+  className: string,
+  label: string,
+  text: string,
+): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
-  button.textContent = label;
-  Object.assign(button.style, {
-    padding: "6px 9px",
-    border: "0",
-    borderRadius: "6px",
-    background: "#8b5cf6",
-    color: "white",
-    cursor: "pointer",
-  });
+  button.className = className;
+  button.textContent = text;
+  button.setAttribute("aria-label", label);
+  button.title = label;
   return button;
+}
+
+function svgElement<K extends keyof SVGElementTagNameMap>(
+  tag: K,
+  className: string,
+): SVGElementTagNameMap[K] {
+  const element = document.createElementNS(SVG_NS, tag);
+  element.setAttribute("class", className);
+  return element;
 }
 
 export function faceBoxFromLandmarks(
@@ -215,6 +230,7 @@ export class MediaPipeGazeTracker {
   private lightSampleContext: CanvasRenderingContext2D | null = null;
   private lastBrightness = 1;
   private blinkDetector = new BlinkDetector();
+  private alignment: HeadAlignment = NOT_ALIGNED;
   private previewVisible = true;
   /** The player's choice to hide the preview, kept across sessions. */
   private previewHidden = readPreviewHidden();
@@ -234,6 +250,19 @@ export class MediaPipeGazeTracker {
     this.listeners.add(listener);
     listener(this.getStatus());
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Whether the head is well in view and facing the screen, as of the last
+   * frame. The gaze model handles head movement within that.
+   */
+  getAlignment(): HeadAlignment {
+    return { ...this.alignment };
+  }
+
+  /** The live camera stream, e.g. to show a larger view while aligning. */
+  getStream(): MediaStream | null {
+    return this.stream;
   }
 
   async start(): Promise<void> {
@@ -275,107 +304,70 @@ export class MediaPipeGazeTracker {
       }
 
       this.stream = stream;
+      // A small retro camera window: title bar, the mirrored feed with the
+      // head guide drawn over it, and a status line. Styles: cameraPreview.css.
       const preview = document.createElement("div");
-      preview.className = "gaze-tracker-preview";
-      Object.assign(preview.style, {
-        position: "fixed",
-        right: "16px",
-        bottom: "16px",
-        width: "min(300px, 30vw)",
-        minWidth: "200px",
-        aspectRatio: "4 / 3",
-        zIndex: "99999",
-        overflow: "hidden",
-        borderRadius: "12px",
-        background: "#111",
-        border: "2px solid #8b5cf6",
-        boxShadow: "0 8px 30px #0006",
-        cursor: "grab",
-        touchAction: "none",
-        userSelect: "none",
-      });
+      preview.className = "cam-preview";
       preview.title = "Drag to move";
 
+      const titleBar = document.createElement("div");
+      titleBar.className = "cam-preview-bar";
+      const rec = document.createElement("i");
+      rec.className = "cam-preview-rec";
+      rec.setAttribute("aria-hidden", "true");
+      const title = document.createElement("span");
+      title.className = "cam-preview-title";
+      title.textContent = "CAM_00 · OPERATOR";
+      const hideButton = previewButton(
+        "cam-preview-btn",
+        "Hide camera preview",
+        "_",
+      );
+      hideButton.addEventListener("click", () => {
+        playSfx("click");
+        this.setPreviewHidden(true);
+      });
+      const stopButton = previewButton("cam-preview-btn", "Stop camera", "×");
+      stopButton.addEventListener("click", () => {
+        playSfx("click");
+        this.stop();
+      });
+      titleBar.append(rec, title, hideButton, stopButton);
+
+      const screen = document.createElement("div");
+      screen.className = "cam-preview-screen";
       const video = document.createElement("video");
       video.autoplay = true;
       video.muted = true;
       video.playsInline = true;
       video.setAttribute("aria-label", "Live face and eye tracking camera");
-      Object.assign(video.style, {
-        width: "100%",
-        height: "100%",
-        objectFit: "cover",
-        transform: "scaleX(-1)",
-        display: "block",
-      });
       video.srcObject = stream;
-
       const overlay = this.createOverlay();
-      Object.assign(overlay.style, {
-        position: "absolute",
-        inset: "0",
-        width: "100%",
-        height: "100%",
-        pointerEvents: "none",
-        transform: "scaleX(-1)",
-      });
+      screen.append(video, overlay);
 
       const label = document.createElement("div");
-      label.textContent = "Starting face tracking…";
-      Object.assign(label.style, {
-        position: "absolute",
-        left: "8px",
-        top: "8px",
-        color: "white",
-        background: "#000a",
-        borderRadius: "6px",
-        padding: "5px 8px",
-        font: "12px/1.4 system-ui, sans-serif",
-      });
+      label.className = "cam-preview-status";
+      label.setAttribute("role", "status");
       label.dataset.trackerStatus = "true";
 
-      const stopButton = previewButton("Stop camera");
-      Object.assign(stopButton.style, {
-        position: "absolute",
-        right: "8px",
-        bottom: "8px",
-      });
-      stopButton.addEventListener("click", () => {
-        playSfx("click");
-        this.stop();
-      });
-
-      const hideButton = previewButton("Hide");
-      Object.assign(hideButton.style, {
-        position: "absolute",
-        left: "8px",
-        bottom: "8px",
-      });
-      hideButton.addEventListener("click", () => {
-        playSfx("click");
-        this.setPreviewHidden(true);
-      });
-
       // Stands in for the hidden preview so it can be brought back any time.
-      const showButton = previewButton("Show camera");
-      Object.assign(showButton.style, {
-        position: "fixed",
-        right: "16px",
-        bottom: "16px",
-        zIndex: "99999",
-        boxShadow: "0 4px 16px #0006",
-      });
+      const showButton = previewButton(
+        "cam-preview-show",
+        "Show camera preview",
+        "▣ SHOW CAM",
+      );
       showButton.addEventListener("click", () => {
         playSfx("click");
         this.setPreviewHidden(false);
       });
 
-      preview.append(video, overlay, label, hideButton, stopButton);
+      preview.append(titleBar, screen, label);
       document.body.append(preview, showButton);
       this.video = video;
       this.preview = preview;
       this.showPreviewButton = showButton;
       this.overlay = overlay;
+      this.renderPreviewStatus();
       this.applyPreviewVisibility();
       this.enablePreviewDrag(preview);
 
@@ -391,7 +383,8 @@ export class MediaPipeGazeTracker {
         }
       });
       if (generation !== this.generation) return;
-      preview.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+      screen.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+      this.drawGuide();
       // The new aspect ratio changes the preview height; keep it on screen.
       if (this.previewPosition) this.placePreview(this.previewPosition);
       this.inferenceCanvas = document.createElement("canvas");
@@ -527,7 +520,7 @@ export class MediaPipeGazeTracker {
         offsetY: event.clientY - rect.top,
       };
       preview.setPointerCapture(event.pointerId);
-      preview.style.cursor = "grabbing";
+      preview.classList.add("is-dragging");
       event.preventDefault();
     });
     preview.addEventListener("pointermove", (event) => {
@@ -540,7 +533,7 @@ export class MediaPipeGazeTracker {
     const endDrag = (event: PointerEvent) => {
       if (drag?.pointerId !== event.pointerId) return;
       drag = null;
-      preview.style.cursor = "grab";
+      preview.classList.remove("is-dragging");
       savePreviewPosition(this.previewPosition);
     };
     preview.addEventListener("pointerup", endDrag);
@@ -633,6 +626,7 @@ export class MediaPipeGazeTracker {
               this.video.videoWidth,
               this.video.videoHeight,
             );
+        this.setAlignment(checkHeadAlignment(features, this.alignment.aligned));
         this.drawOverlay(face, detectorBox);
         gazeController.setTrackerFeatures(features);
 
@@ -671,33 +665,86 @@ export class MediaPipeGazeTracker {
   }
 
   private createOverlay(): SVGSVGElement {
-    const svg = document.createElementNS(SVG_NS, "svg");
+    const svg = svgElement("svg", "cam-preview-overlay");
     svg.setAttribute("aria-hidden", "true");
-    const faceBox = document.createElementNS(SVG_NS, "rect");
+    // The head guide: where the face should sit for calibration.
+    const guide = svgElement("ellipse", "cam-guide");
+    guide.dataset.guide = "true";
+    const eyeLine = svgElement("line", "cam-guide-eyes");
+    eyeLine.dataset.guideEyes = "true";
+    const faceBox = svgElement("rect", "cam-face-box");
     faceBox.dataset.faceBox = "true";
-    faceBox.setAttribute("fill", "none");
-    faceBox.setAttribute("stroke", "#a78bfa");
-    faceBox.setAttribute("stroke-width", "3");
-    faceBox.setAttribute("rx", "8");
-    svg.append(faceBox);
+    svg.append(guide, eyeLine, faceBox);
 
     for (const eye of EYE_LANDMARKS) {
       for (const index of eye.corners) {
-        const corner = document.createElementNS(SVG_NS, "circle");
+        const corner = svgElement("circle", "cam-eye-corner");
         corner.dataset.landmark = String(index);
-        corner.setAttribute("r", "3");
-        corner.setAttribute("fill", "#22d3ee");
+        corner.setAttribute("r", "4");
         svg.append(corner);
       }
-      const iris = document.createElementNS(SVG_NS, "circle");
+      const iris = svgElement("circle", "cam-iris");
       iris.dataset.iris = String(eye.iris[0]);
       iris.setAttribute("r", "7");
-      iris.setAttribute("fill", "#f43f5e");
-      iris.setAttribute("stroke", "white");
-      iris.setAttribute("stroke-width", "2");
       svg.append(iris);
     }
     return svg;
+  }
+
+  /** Sizes the head guide to the camera frame once its resolution is known. */
+  private drawGuide(): void {
+    const width = this.video?.videoWidth ?? 0;
+    const height = this.video?.videoHeight ?? 0;
+    if (!this.overlay || !width || !height) return;
+    this.overlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    const { cx, cy, rx, ry, eyeY } = headGuide(width, height);
+    const guide = this.overlay.querySelector("[data-guide]");
+    guide?.setAttribute("cx", String(cx));
+    guide?.setAttribute("cy", String(cy));
+    guide?.setAttribute("rx", String(rx));
+    guide?.setAttribute("ry", String(ry));
+    const eyes = this.overlay.querySelector("[data-guide-eyes]");
+    eyes?.setAttribute("x1", String(cx - rx * 0.75));
+    eyes?.setAttribute("x2", String(cx + rx * 0.75));
+    eyes?.setAttribute("y1", String(eyeY));
+    eyes?.setAttribute("y2", String(eyeY));
+  }
+
+  private setAlignment(alignment: HeadAlignment): void {
+    if (
+      alignment.aligned === this.alignment.aligned &&
+      alignment.issue === this.alignment.issue
+    ) {
+      return;
+    }
+    this.alignment = alignment;
+    this.renderPreviewStatus();
+  }
+
+  /** The preview's status line: tracker state first, then head alignment. */
+  private renderPreviewStatus(): void {
+    const preview = this.preview;
+    const label = preview?.querySelector<HTMLElement>("[data-tracker-status]");
+    if (!preview || !label) return;
+    const { phase, message } = this.status;
+    const [tone, text] =
+      phase === "running" && this.alignment.aligned
+        ? ["ok", "● FACE IN VIEW"]
+        : phase === "running"
+          ? ["warn", `▲ ALIGN: ${this.alignment.hint}`]
+          : phase === "no-face"
+            ? ["warn", "■ NO FACE · face the camera, add light"]
+            : phase === "no-eyes"
+              ? ["warn", "■ EYES NOT TRACKED · keep both visible"]
+              : phase === "error"
+                ? ["error", `■ ${message}`]
+                : ["off", message];
+    preview.dataset.aligned = String(
+      phase === "running" && this.alignment.aligned,
+    );
+    label.dataset.tone = tone;
+    label.textContent = text;
+    label.title = message;
   }
 
   private prepareInferenceFrame(): HTMLCanvasElement {
@@ -822,6 +869,7 @@ export class MediaPipeGazeTracker {
     this.showPreviewButton = null;
     this.overlay = null;
     this.blinkDetector.reset();
+    this.alignment = NOT_ALIGNED;
     gazeController.clearTracker();
   }
 
@@ -834,10 +882,7 @@ export class MediaPipeGazeTracker {
       return;
     }
     this.status = status;
-    const label = this.preview?.querySelector<HTMLElement>(
-      "[data-tracker-status]",
-    );
-    if (label) label.textContent = status.message;
+    this.renderPreviewStatus();
     for (const listener of this.listeners) listener(this.getStatus());
   }
 }
