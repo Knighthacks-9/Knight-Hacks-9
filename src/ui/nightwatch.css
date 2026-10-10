@@ -2869,3 +2869,66 @@ body.nw {
     font-size: 17px;
   }
 }
+
+/* Powered off: a dark screen with the power button. */
+.power-off {
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: #000;
+}
+
+.power-off::after {
+  display: none;
+}
+
+.power-message {
+  margin: 0;
+  color: var(--amber-text);
+}
+
+.power-btn {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  border: 3px solid var(--lo);
+  border-radius: 50% !important;
+  background: #0c0f0d;
+  color: var(--dim);
+}
+
+.power-btn:hover,
+.power-btn:focus-visible {
+  border-color: var(--green);
+  color: var(--green-text);
+  box-shadow: 0 0 18px rgba(102, 208, 138, 0.45);
+}
+
+/* The power symbol: a ring with a gap at the top and a bar through it. */
+.power-glyph {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border: 4px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+}
+
+.power-glyph::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -10px;
+  width: 4px;
+  height: 20px;
+  margin-left: -2px;
+  background: currentColor;
+}
+
+.power-hint {
+  margin: 0;
+  color: var(--dim);
+  font-size: 18px;
+  letter-spacing: 3px;
+}
