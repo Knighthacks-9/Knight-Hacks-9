@@ -15,8 +15,8 @@ npm run dev
 ```
 
 Open the local URL printed by Vite. From Calibration, adjust gaze sensitivity
-and smoothing, enable or disable mouse fallback, or run the five-point gaze
-calibration. Settings and calibration samples are saved in browser storage.
+and smoothing, enable or disable mouse fallback, or run the nine-point gaze
+calibration. Settings and the fitted calibration are saved in browser storage.
 
 Select **Enable webcam** on Calibration and grant camera permission to start
 MediaPipe Face Landmarker and the independent BlazeFace detector. On first use,
@@ -27,8 +27,32 @@ stream where supported; low-light frames are brightened for detection without
 changing the visible preview. This can help in dim rooms but cannot replace
 light on your face. A mirrored live preview appears in the lower-right corner
 while the camera is active and disappears when it is stopped. A face box is
-shown whenever either detector finds a face. Use **Eye debug** in the preview
-to show eye corners and iris markers. Camera access requires HTTPS or localhost.
+shown whenever either detector finds a face, with eye corners and iris markers.
+Camera access requires HTTPS or localhost.
+
+### Gaze calibration
+
+Once the webcam tracks both eyes, select **Start 9-point calibration** and
+follow the dot. Each point takes about two seconds and needs no key presses:
+the dot glides to a spot, waits for your eyes to settle, then records about a
+second of frames (blinks are skipped). Look at the dot the way you normally
+look at the screen, including turning your head if that is natural.
+
+Calibration fits a ridge regression from per-frame features (iris position
+inside each eye, eyelid opening, head yaw and pitch from MediaPipe's facial
+transformation matrix, and head position) to canvas coordinates. Each point is
+also predicted with that point left out, giving the **estimated error** shown
+afterwards; toggle the debug overlay (**D**) on the test screen to see those
+held-out predictions. The test screen lights up whichever of six stand-in
+camera feeds you are looking at.
+
+Recalibrate after changing seat, screen, lighting, window size, or browser
+zoom, since the mapping is tied to where the canvas sits on your screen.
+
+Other modules read gaze from `gazeController` in `src/vision`: `getPoint()`
+returns a smoothed canvas point (0..1), `getSource()` reports `tracker`,
+`mouse`, or `none`, and `isBlinking()` reports blinks. Gaze is held for up to
+350 ms through blinks and dropped frames before falling back to the mouse.
 
 ## Scripts
 

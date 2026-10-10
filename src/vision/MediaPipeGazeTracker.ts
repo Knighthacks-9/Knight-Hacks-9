@@ -4,7 +4,12 @@ import type {
   FaceLandmarker,
   NormalizedLandmark,
 } from "@mediapipe/tasks-vision";
-import { gazeController, type GazePoint } from "./index";
+import {
+  BlinkDetector,
+  EYE_LANDMARKS,
+  extractGazeFeatures,
+} from "./gazeFeatures";
+import { gazeController } from "./index";
 
 export type TrackerPhase =
   | "idle"
@@ -34,12 +39,36 @@ const MODEL_URL =
 const FACE_DETECTOR_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 const SVG_NS = "http://www.w3.org/2000/svg";
+const PREVIEW_POSITION_KEY = "night-watch:camera-preview-position";
+const PREVIEW_MARGIN = 8;
 
-// MediaPipe Face Landmarker iris and eye landmarks.
-const EYES = [
-  { corners: [33, 133] as const, upper: 159, lower: 145, iris: 468 },
-  { corners: [362, 263] as const, upper: 386, lower: 374, iris: 473 },
-] as const;
+interface PreviewPosition {
+  left: number;
+  top: number;
+}
+
+function readPreviewPosition(): PreviewPosition | null {
+  try {
+    const stored = globalThis.localStorage?.getItem(PREVIEW_POSITION_KEY);
+    if (!stored) return null;
+    const value = JSON.parse(stored) as Partial<PreviewPosition> | null;
+    return Number.isFinite(value?.left) && Number.isFinite(value?.top)
+      ? { left: value!.left!, top: value!.top! }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePreviewPosition(position: PreviewPosition | null): void {
+  try {
+    if (position) {
+      localStorage.setItem(PREVIEW_POSITION_KEY, JSON.stringify(position));
+    }
+  } catch (error) {
+    console.error("Could not save the camera preview position.", error);
+  }
+}
 
 export function faceBoxFromLandmarks(
   landmarks: NormalizedLandmark[],
@@ -94,51 +123,6 @@ export function faceBoxFromDetection(
   const bottom = Math.min(frameHeight, box.originY + box.height);
   if (right <= x || bottom <= y) return null;
   return { x, y, width: right - x, height: bottom - y };
-}
-
-/**
- * Returns the average iris position relative to each eye.
- * x/y are normalized 0..1 eye-relative coordinates, not calibrated screen coordinates.
- */
-export function estimateGazePoint(
-  landmarks: NormalizedLandmark[],
-): GazePoint | null {
-  if (landmarks.length < 478) return null;
-
-  let xTotal = 0;
-  let yTotal = 0;
-
-  for (const eye of EYES) {
-    const a = landmarks[eye.corners[0]];
-    const b = landmarks[eye.corners[1]];
-    const upper = landmarks[eye.upper];
-    const lower = landmarks[eye.lower];
-    const iris = landmarks[eye.iris];
-
-    if (
-      ![a, b, upper, lower, iris].every(
-        (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y),
-      )
-    ) {
-      return null;
-    }
-
-    const left = Math.min(a.x, b.x);
-    const width = Math.abs(a.x - b.x);
-    const top = Math.min(upper.y, lower.y);
-    const height = Math.abs(upper.y - lower.y);
-
-    // Closed eyes, missing landmarks, or degenerate eye geometry.
-    if (width < 0.008 || height < 0.001) return null;
-
-    xTotal += (iris.x - left) / width;
-    yTotal += (iris.y - top) / height;
-  }
-
-  return {
-    x: clamp(xTotal / 2, 0, 1),
-    y: clamp(yTotal / 2, 0, 1),
-  };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -197,6 +181,10 @@ export class MediaPipeGazeTracker {
   private lightSampleCanvas: HTMLCanvasElement | null = null;
   private lightSampleContext: CanvasRenderingContext2D | null = null;
   private lastBrightness = 1;
+  private blinkDetector = new BlinkDetector();
+  private previewVisible = true;
+  private previewPosition: PreviewPosition | null = readPreviewPosition();
+  private removePreviewDrag: (() => void) | null = null;
   private rafId = 0;
   private generation = 0;
   private lastVideoTime = -1;
@@ -256,8 +244,8 @@ export class MediaPipeGazeTracker {
         position: "fixed",
         right: "16px",
         bottom: "16px",
-        width: "min(420px, 42vw)",
-        minWidth: "260px",
+        width: "min(300px, 30vw)",
+        minWidth: "200px",
         aspectRatio: "4 / 3",
         zIndex: "99999",
         overflow: "hidden",
@@ -265,7 +253,11 @@ export class MediaPipeGazeTracker {
         background: "#111",
         border: "2px solid #8b5cf6",
         boxShadow: "0 8px 30px #0006",
+        cursor: "grab",
+        touchAction: "none",
+        userSelect: "none",
       });
+      preview.title = "Drag to move";
 
       const video = document.createElement("video");
       video.autoplay = true;
@@ -326,6 +318,8 @@ export class MediaPipeGazeTracker {
       this.video = video;
       this.preview = preview;
       this.overlay = overlay;
+      this.applyPreviewVisibility();
+      this.enablePreviewDrag(preview);
 
       await video.play();
       await new Promise<void>((resolve) => {
@@ -340,6 +334,8 @@ export class MediaPipeGazeTracker {
       });
       if (generation !== this.generation) return;
       preview.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+      // The new aspect ratio changes the preview height; keep it on screen.
+      if (this.previewPosition) this.placePreview(this.previewPosition);
       this.inferenceCanvas = document.createElement("canvas");
       this.inferenceContext = this.inferenceCanvas.getContext("2d", {
         willReadFrequently: true,
@@ -391,7 +387,8 @@ export class MediaPipeGazeTracker {
         minFacePresenceConfidence: 0.12,
         minTrackingConfidence: 0.12,
         outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: false,
+        // Head pose for gaze features comes from this matrix.
+        outputFacialTransformationMatrixes: true,
       });
 
       if (generation !== this.generation) {
@@ -423,6 +420,92 @@ export class MediaPipeGazeTracker {
     this.setStatus({ phase: "idle", message: "Camera tracking is off." });
   }
 
+  /**
+   * Hides the preview without pausing the camera, e.g. so it does not cover or
+   * distract from calibration targets. Opacity keeps the video decoding.
+   */
+  setPreviewVisible(visible: boolean): void {
+    this.previewVisible = visible;
+    this.applyPreviewVisibility();
+  }
+
+  /** Lets the player drag the preview anywhere in the window, except by its buttons. */
+  private enablePreviewDrag(preview: HTMLDivElement): void {
+    let drag: { pointerId: number; offsetX: number; offsetY: number } | null =
+      null;
+
+    preview.addEventListener("pointerdown", (event) => {
+      if (
+        event.button !== 0 ||
+        (event.target instanceof Element && event.target.closest("button"))
+      ) {
+        return;
+      }
+      const rect = preview.getBoundingClientRect();
+      drag = {
+        pointerId: event.pointerId,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+      };
+      preview.setPointerCapture(event.pointerId);
+      preview.style.cursor = "grabbing";
+      event.preventDefault();
+    });
+    preview.addEventListener("pointermove", (event) => {
+      if (drag?.pointerId !== event.pointerId) return;
+      this.placePreview({
+        left: event.clientX - drag.offsetX,
+        top: event.clientY - drag.offsetY,
+      });
+    });
+    const endDrag = (event: PointerEvent) => {
+      if (drag?.pointerId !== event.pointerId) return;
+      drag = null;
+      preview.style.cursor = "grab";
+      savePreviewPosition(this.previewPosition);
+    };
+    preview.addEventListener("pointerup", endDrag);
+    preview.addEventListener("pointercancel", endDrag);
+
+    const onResize = () => {
+      if (this.previewPosition) this.placePreview(this.previewPosition);
+    };
+    window.addEventListener("resize", onResize);
+    this.removePreviewDrag = () =>
+      window.removeEventListener("resize", onResize);
+
+    if (this.previewPosition) this.placePreview(this.previewPosition);
+  }
+
+  private placePreview(position: PreviewPosition): void {
+    const preview = this.preview;
+    if (!preview) return;
+    const { width, height } = preview.getBoundingClientRect();
+    const left = clamp(
+      position.left,
+      PREVIEW_MARGIN,
+      Math.max(PREVIEW_MARGIN, window.innerWidth - width - PREVIEW_MARGIN),
+    );
+    const top = clamp(
+      position.top,
+      PREVIEW_MARGIN,
+      Math.max(PREVIEW_MARGIN, window.innerHeight - height - PREVIEW_MARGIN),
+    );
+    this.previewPosition = { left, top };
+    Object.assign(preview.style, {
+      left: `${left}px`,
+      top: `${top}px`,
+      right: "auto",
+      bottom: "auto",
+    });
+  }
+
+  private applyPreviewVisibility(): void {
+    if (!this.preview) return;
+    this.preview.style.opacity = this.previewVisible ? "1" : "0";
+    this.preview.style.pointerEvents = this.previewVisible ? "" : "none";
+  }
+
   private processFrame(generation: number): void {
     if (
       generation !== this.generation ||
@@ -440,9 +523,21 @@ export class MediaPipeGazeTracker {
       this.lastVideoTime = this.video.currentTime;
       try {
         const frame = this.prepareInferenceFrame();
-        const result = this.landmarker.detectForVideo(frame, performance.now());
+        const timestamp = performance.now();
+        const result = this.landmarker.detectForVideo(frame, timestamp);
         const face = result.faceLandmarks[0] ?? null;
-        const gaze = face ? estimateGazePoint(face) : null;
+        const features = face
+          ? extractGazeFeatures(
+              face,
+              frame.width,
+              frame.height,
+              timestamp,
+              result.facialTransformationMatrixes?.[0],
+            )
+          : null;
+        if (features) {
+          features.blink = this.blinkDetector.update(features.openness);
+        }
         const detection = face
           ? null
           : this.faceDetector?.detectForVideo(frame, performance.now())
@@ -455,7 +550,7 @@ export class MediaPipeGazeTracker {
               this.video.videoHeight,
             );
         this.drawOverlay(face, detectorBox);
-        gazeController.setTrackerPoint(gaze);
+        gazeController.setTrackerFeatures(features);
 
         if (!face && !detectorBox) {
           this.setStatus({
@@ -468,7 +563,7 @@ export class MediaPipeGazeTracker {
             message:
               "BlazeFace found your face (box shown); iris tracking did not. Keep both eyes visible and well lit.",
           });
-        } else if (!gaze) {
+        } else if (!features) {
           this.setStatus({
             phase: "no-eyes",
             message:
@@ -477,7 +572,7 @@ export class MediaPipeGazeTracker {
         } else {
           this.setStatus({
             phase: "running",
-            message: `Face + both irises detected · eye position ${gaze.x.toFixed(2)}, ${gaze.y.toFixed(2)}`,
+            message: "Face and both irises tracked.",
           });
         }
       } catch (error) {
@@ -502,7 +597,7 @@ export class MediaPipeGazeTracker {
     faceBox.setAttribute("rx", "8");
     svg.append(faceBox);
 
-    for (const eye of EYES) {
+    for (const eye of EYE_LANDMARKS) {
       for (const index of eye.corners) {
         const corner = document.createElementNS(SVG_NS, "circle");
         corner.dataset.landmark = String(index);
@@ -511,7 +606,7 @@ export class MediaPipeGazeTracker {
         svg.append(corner);
       }
       const iris = document.createElementNS(SVG_NS, "circle");
-      iris.dataset.iris = String(eye.iris);
+      iris.dataset.iris = String(eye.iris[0]);
       iris.setAttribute("r", "7");
       iris.setAttribute("fill", "#f43f5e");
       iris.setAttribute("stroke", "white");
@@ -635,13 +730,23 @@ export class MediaPipeGazeTracker {
       this.video.srcObject = null;
       this.video = null;
     }
+    this.removePreviewDrag?.();
+    this.removePreviewDrag = null;
     this.preview?.remove();
     this.preview = null;
     this.overlay = null;
-    gazeController.setTrackerPoint(null);
+    this.blinkDetector.reset();
+    gazeController.clearTracker();
   }
 
   private setStatus(status: TrackerStatus): void {
+    // Frames arrive ~30 times a second; only notify listeners on real changes.
+    if (
+      status.phase === this.status.phase &&
+      status.message === this.status.message
+    ) {
+      return;
+    }
     this.status = status;
     const label = this.preview?.querySelector<HTMLElement>(
       "[data-tracker-status]",

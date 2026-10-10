@@ -1,84 +1,124 @@
 import { describe, expect, it } from "vitest";
+import type { GazeFeatures } from "./gazeFeatures";
+import { GAZE_FEATURE_KEYS, type GazeModel } from "./gazeModel";
 import {
   DEFAULT_GAZE_SETTINGS,
   GazeController,
-  applyCalibration,
-  fitCalibration,
-  type CalibrationSample,
+  TRACKER_HOLD_MS,
 } from "./index";
+import { OneEuroFilter } from "./oneEuroFilter";
 
-describe("gaze calibration", () => {
-  const samples: CalibrationSample[] = [
-    { input: { x: 0, y: 0 }, target: { x: 0.1, y: 0.2 } },
-    { input: { x: 1, y: 0 }, target: { x: 0.9, y: 0.2 } },
-    { input: { x: 0, y: 1 }, target: { x: 0.1, y: 0.8 } },
-    { input: { x: 1, y: 1 }, target: { x: 0.9, y: 0.8 } },
-  ];
+// Screen x = 0.5 - eyeX and screen y = 0.5 + eyeY, with everything else ignored.
+const MODEL: GazeModel = {
+  features: [...GAZE_FEATURE_KEYS],
+  mean: GAZE_FEATURE_KEYS.map(() => 0),
+  scale: GAZE_FEATURE_KEYS.map(() => 1),
+  weightsX: [0.5, -1, 0, 0, 0, 0, 0, 0],
+  weightsY: [0.5, 0, 1, 0, 0, 0, 0, 0],
+  alpha: 0.01,
+  validation: [],
+};
 
-  it("fits a two-axis affine mapping from multiple samples", () => {
-    const transform = fitCalibration(samples);
+function features(overrides: Partial<GazeFeatures> = {}): GazeFeatures {
+  return {
+    eyeX: 0,
+    eyeY: 0,
+    openness: 0.3,
+    yaw: 0,
+    pitch: 0,
+    faceX: 0.5,
+    faceY: 0.5,
+    faceScale: 0.12,
+    blink: false,
+    timestamp: 1000,
+    ...overrides,
+  };
+}
 
-    expect(transform).not.toBeNull();
-    expect(applyCalibration(transform!, { x: 0.5, y: 0.5 })).toEqual({
-      x: expect.closeTo(0.5),
-      y: expect.closeTo(0.5),
-    });
-  });
-
-  it("rejects too few or collinear calibration samples", () => {
-    expect(fitCalibration(samples.slice(0, 2))).toBeNull();
-    expect(
-      fitCalibration([
-        { input: { x: 0, y: 0 }, target: { x: 0, y: 0 } },
-        { input: { x: 0.5, y: 0.5 }, target: { x: 0.5, y: 0.5 } },
-        { input: { x: 1, y: 1 }, target: { x: 1, y: 1 } },
-      ]),
-    ).toBeNull();
-  });
-});
+function unsmoothed(): GazeController {
+  return new GazeController({ ...DEFAULT_GAZE_SETTINGS, smoothing: 0 });
+}
 
 describe("gaze controller", () => {
-  it("uses a tracker sample first and the mouse only as an enabled fallback", () => {
-    const controller = new GazeController();
+  it("uses the mouse until a calibration exists", () => {
+    const controller = unsmoothed();
     controller.setMousePoint({ x: 0.2, y: 0.3 });
-    expect(controller.getSource()).toBe("mouse");
-    expect(controller.getTrackerPoint()).toBeNull();
+    controller.setTrackerFeatures(features({ eyeX: -0.3 }));
 
-    controller.setTrackerPoint({ x: 0.8, y: 0.7 });
-    expect(controller.getSource()).toBe("tracker");
-    expect(controller.getTrackerPoint()).toEqual({ x: 0.8, y: 0.7 });
-    expect(controller.getPoint()).toEqual({ x: 0.8, y: 0.7 });
-
-    controller.setTrackerPoint(null);
-    controller.setSettings({
-      ...DEFAULT_GAZE_SETTINGS,
-      useMouseFallback: false,
-    });
-    expect(controller.getSource()).toBe("none");
+    expect(controller.getSource(1000)).toBe("mouse");
+    expect(controller.getTrackerFeatures()?.eyeX).toBe(-0.3);
+    expect(controller.getPoint(1000)).toEqual({ x: 0.2, y: 0.3 });
   });
 
-  it("applies smoothing to output while preserving the raw sample", () => {
+  it("prefers calibrated tracker gaze and drops to none without a fallback", () => {
+    const controller = unsmoothed();
+    controller.setModel(MODEL);
+    controller.setMousePoint({ x: 0.2, y: 0.3 });
+    controller.setTrackerFeatures(features({ eyeX: -0.3, eyeY: -0.2 }));
+
+    expect(controller.getSource(1000)).toBe("tracker");
+    expect(controller.getPoint(1000)).toEqual({
+      x: expect.closeTo(0.8),
+      y: expect.closeTo(0.3),
+    });
+
+    controller.clearTracker();
+    controller.setSettings({
+      ...controller.getSettings(),
+      useMouseFallback: false,
+    });
+    expect(controller.getSource(1000)).toBe("none");
+    expect(controller.getPoint(1000)).toBeNull();
+  });
+
+  it("holds the last gaze through blinks and brief dropouts", () => {
+    const controller = unsmoothed();
+    controller.setModel(MODEL);
+    controller.setMousePoint({ x: 0.2, y: 0.3 });
+    controller.setTrackerFeatures(features({ eyeX: -0.3, timestamp: 1000 }));
+    controller.setTrackerFeatures(
+      features({ eyeX: 0.4, blink: true, timestamp: 1100 }),
+    );
+
+    expect(controller.isBlinking()).toBe(true);
+    expect(controller.getRawPoint(1100)?.x).toBeCloseTo(0.8);
+
+    controller.setTrackerFeatures(null);
+    expect(controller.getSource(1000 + TRACKER_HOLD_MS)).toBe("tracker");
+    expect(controller.getSource(1001 + TRACKER_HOLD_MS)).toBe("mouse");
+  });
+
+  it("smooths jitter, converges on steady gaze, and resets on source change", () => {
     const controller = new GazeController({
       ...DEFAULT_GAZE_SETTINGS,
       smoothing: 0.5,
     });
     controller.setMousePoint({ x: 0.2, y: 0.4 });
-    expect(controller.getPoint()).toEqual({ x: 0.2, y: 0.4 });
+    expect(controller.getPoint(0)).toEqual({ x: 0.2, y: 0.4 });
 
     controller.setMousePoint({ x: 0.8, y: 0.6 });
-    expect(controller.getRawPoint()).toEqual({ x: 0.8, y: 0.6 });
-    expect(controller.getPoint()).toEqual({ x: 0.5, y: 0.5 });
+    const first = controller.getPoint(16)!;
+    expect(first.x).toBeGreaterThan(0.2);
+    expect(first.x).toBeLessThan(0.8);
+
+    let point = first;
+    for (let time = 32; time <= 3000; time += 16) {
+      point = controller.getPoint(time)!;
+    }
+    expect(point.x).toBeCloseTo(0.8, 2);
+    expect(point.y).toBeCloseTo(0.6, 2);
+
+    controller.setModel(MODEL);
+    controller.setTrackerFeatures(features({ eyeX: 0.3, timestamp: 3000 }));
+    expect(controller.getPoint(3016)?.x).toBeCloseTo(0.2);
   });
+});
 
-  it("resets smoothing when the active gaze source changes", () => {
-    const controller = new GazeController({
-      ...DEFAULT_GAZE_SETTINGS,
-      smoothing: 0.8,
-    });
-    controller.setMousePoint({ x: 0.2, y: 0.4 });
-    controller.getPoint();
-
-    controller.setTrackerPoint({ x: 0.8, y: 0.6 });
-    expect(controller.getPoint()).toEqual({ x: 0.8, y: 0.6 });
+describe("one euro filter", () => {
+  it("ignores repeated reads at the same timestamp", () => {
+    const filter = new OneEuroFilter(1, 0.5);
+    filter.filter(0, 0);
+    const moved = filter.filter(1, 16);
+    expect(filter.filter(5, 16)).toBe(moved);
   });
 });
