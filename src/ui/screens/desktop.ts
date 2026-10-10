@@ -108,6 +108,7 @@ const TEXT_FILES = [
   { name: "Credits.txt", text: CREDITS },
   { name: "Attributions.txt", text: ATTRIBUTIONS },
 ];
+export type PowerMode = "restart" | "shutdown";
 
 interface Shortcut {
   label: string;
@@ -120,6 +121,7 @@ export function buildDesktop(
   root: HTMLElement,
   open: (screen: ScreenName) => void,
   openLastDebrief: () => void,
+  power: (mode: PowerMode) => void,
 ) {
   const layer = h("div", { class: "desk-layer" });
   const overlay = h("div", { class: "app-overlay" });
@@ -292,6 +294,31 @@ export function buildDesktop(
         null,
         h("a", { class: "start-item", href: "?ui=classic" }, "Classic Mode..."),
       ),
+      h("li", { class: "start-sep", role: "separator" }),
+      ...(
+        [
+          ["Restart", "restart"],
+          ["Shut Down", "shutdown"],
+        ] as const
+      ).map(([label, mode]) =>
+        h(
+          "li",
+          null,
+          h(
+            "button",
+            {
+              type: "button",
+              class: "start-item",
+              onclick: () => {
+                playSfx("click");
+                closeMenu();
+                power(mode);
+              },
+            },
+            label,
+          ),
+        ),
+      ),
     ),
   );
   const startButton = h(
@@ -362,6 +389,13 @@ export function buildDesktop(
   return {
     layer,
     overlay,
+    /** Closes everything the desktop itself opened (power off). */
+    reset() {
+      closeMenu();
+      readme?.destroy();
+      readme = null;
+      renderTasks();
+    },
     setTask(label: string | null, toggle?: () => void) {
       current = label ? { label, toggle } : null;
       renderTasks();
