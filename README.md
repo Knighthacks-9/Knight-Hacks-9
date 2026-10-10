@@ -1,4 +1,4 @@
-# Night Watch
+# Knight's Eye
 
 A small browser game for a four-person team, built with Phaser and Vite.
 
@@ -14,7 +14,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. The game opens on the NIGHTWATCH desktop
+Open the local URL printed by Vite. The game opens on the Knight's Eye desktop
 (see [Desktop UI](#desktop-ui)); the original Phaser version is still available
 at `/?ui=classic`. From Calibration, adjust gaze sensitivity
 and smoothing, enable or disable mouse fallback, or run the nine-point gaze
@@ -160,7 +160,7 @@ functions, so there it always uses the browser fallbacks.
 | `src/analytics/` | Person 4 | Shift logging, catch/miss classification, debrief report and panel         |
 | `src/audio/`     | Shared   | Dispatcher voice and push-to-talk (`netlify/functions` proxies ElevenLabs) |
 | `src/shared/`    | Everyone | `types.ts` (the contract) and `eventBus.ts`                                |
-| `src/ui/`        | Shared   | NIGHTWATCH desktop UI; `service/` adapts it to the modules above           |
+| `src/ui/`        | Shared   | Knight's Eye desktop UI; `service/` adapts it to the modules above           |
 
 `src/main.ts` installs analytics and starts the desktop UI (`src/ui`), or
 with `?ui=classic` loads `src/classic.ts`, which boots Phaser, registers the

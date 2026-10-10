@@ -1,4 +1,4 @@
-/* NIGHTWATCH desktop UI: late-90s window chrome, CRT camera feeds. */
+/* KNIGHT'S EYE desktop UI: late-90s window chrome, CRT camera feeds. */
 
 :root {
   --font-pixel: "Press Start 2P", "Courier New", monospace;
@@ -602,7 +602,7 @@ body.nw {
 
 .menu-title {
   margin: 0;
-  font-size: clamp(22px, 6.4vw, 48px);
+  font-size: clamp(18px, 5.3vw, 40px);
 }
 
 .menu-tagline {

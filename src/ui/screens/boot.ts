@@ -12,7 +12,7 @@ const POST_LINES = [
   "Radio link ......... DISPATCH online",
   "Gaze sensor ........ standby",
   "",
-  "Starting NIGHTWATCH 98 ...",
+  "Starting KNIGHT'S EYE 98 ...",
 ];
 
 interface BriefingStep {
@@ -32,7 +32,7 @@ const BRIEFING: BriefingStep[] = [
   {
     title: "YOUR EYES ARE THE CONTROLLER",
     lines: [
-      "Gaze Setup calibrates the webcam so NIGHTWATCH knows which",
+      "Gaze Setup calibrates the webcam so KNIGHT'S EYE knows which",
       "feed you are looking at. No webcam? The mouse pointer stands",
       "in for your gaze.",
     ],
