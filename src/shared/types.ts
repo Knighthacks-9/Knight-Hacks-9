@@ -117,6 +117,8 @@ export interface GazeSample {
   source: GazeSource;
   /** Camera feed under the gaze point, or null when off the feeds. */
   cameraId: string | null;
+  /** The gaze point mapped into the building (tile units) through that feed. */
+  world?: Vec2 | null;
 }
 
 /** The player clicked an NPC on a camera feed. */
@@ -187,6 +189,14 @@ export interface GazeSegment {
   end: number;
 }
 
+/** How far the gaze was from the nearest suspect a shown feed could see. */
+export interface GazeDistanceSample {
+  t: number;
+  /** Tiles between the gaze point and the suspect; null when looking off the feeds. */
+  tiles: number | null;
+  npcId: string;
+}
+
 export interface ShiftReport {
   level: number;
   duration: number;
@@ -197,6 +207,8 @@ export interface ShiftReport {
   falseFlags: Flag[];
   feeds: FeedStats[];
   timeline: GazeSegment[];
+  /** Sampled while a suspect is on a shown feed; gaps mean no suspect was visible. */
+  gazeDistance: GazeDistanceSample[];
   /** Seconds gaze came from the webcam tracker (the rest is mouse or none). */
   trackerSeconds: number;
 }

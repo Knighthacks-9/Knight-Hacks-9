@@ -231,6 +231,105 @@ body {
   background: rgba(251, 146, 60, 0.45);
 }
 
+.line-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.line-chart .grid {
+  stroke: rgba(148, 163, 184, 0.15);
+  stroke-width: 1;
+}
+
+.line-chart .tick {
+  fill: #a5b4cf;
+  font-size: 10px;
+}
+
+.line-chart .avg {
+  stroke: #94a3b8;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.line-chart .line {
+  fill: none;
+  stroke: #4ade80;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* Points stay hidden until hovered; the larger transparent circle is the hit target. */
+.line-chart .hit {
+  fill: transparent;
+}
+
+.line-chart .dot {
+  fill: #4ade80;
+  stroke: #0f172a;
+  stroke-width: 2;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.line-chart .chart-point:hover .dot {
+  opacity: 1;
+}
+
+.analytics-panel h4 {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-table th,
+.history-table td {
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.history-table th {
+  color: #a5b4cf;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.history-clear {
+  justify-self: start;
+  padding: 6px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  background: transparent;
+  color: #cbd5e1;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.history-clear:hover,
+.history-clear[data-armed] {
+  border-color: #fca5a5;
+  color: #fca5a5;
+}
+
 .heat-value {
   font-size: 1rem;
   font-weight: 700;

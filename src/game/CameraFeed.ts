@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type {
   CameraDef,
   TileType,
+  Vec2,
   WorldMap,
   WorldSnapshot,
 } from "../shared/types";
@@ -113,6 +114,14 @@ export class CameraFeed extends Phaser.GameObjects.Container {
     );
   }
 
+  /** Maps a canvas point (in pixels) on this feed back to building tile units. */
+  toWorld(px: number, py: number): Vec2 {
+    return {
+      x: this.minTileX + (px - this.x - this.viewX) / this.tileSize,
+      y: this.minTileY + (py - this.y - this.viewY) / this.tileSize,
+    };
+  }
+
   /**
    * Border: amber when chosen in a report, green when the player is looking
    * at it, grey otherwise.
@@ -120,6 +129,11 @@ export class CameraFeed extends Phaser.GameObjects.Container {
   setHighlight(watched: boolean, selected: boolean): void {
     if (selected) this.border.setStrokeStyle(4, 0xfbbf24);
     else this.border.setStrokeStyle(2, watched ? 0x4ade80 : 0x3a4a42);
+  }
+
+  /** Highlights the feed the player is looking at (kept for older callers). */
+  setWatched(watched: boolean): void {
+    this.setHighlight(watched, false);
   }
 
   /**

@@ -206,6 +206,7 @@ export class ShiftScene extends Phaser.Scene {
       y: point?.y ?? null,
       source,
       cameraId: watched?.camera.id ?? null,
+      world: watched?.toWorld(px, py) ?? null,
     });
 
     if (this.t >= this.shiftSeconds) return this.endShift(true);
