@@ -11,4 +11,17 @@ export default tseslint.config(
       "@typescript-eslint/no-empty-object-type": "off",
     },
   },
+  {
+    // Node scripts (e.g. npm run voice:generate).
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        Buffer: "readonly",
+        URL: "readonly",
+        console: "readonly",
+        fetch: "readonly",
+        process: "readonly",
+      },
+    },
+  },
 );

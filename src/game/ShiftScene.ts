@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { startListening, type Transmission } from "../audio";
 import { eventBus } from "../shared/eventBus";
 import type { ShiftReport, WorldMap, WorldSnapshot } from "../shared/types";
 import { gazeController } from "../vision";
@@ -38,6 +39,9 @@ export class ShiftScene extends Phaser.Scene {
   private ended = false;
   private hud!: Phaser.GameObjects.Text;
   private reticle!: Phaser.GameObjects.Arc;
+  private transmittingText!: Phaser.GameObjects.Text;
+  private transmission: Transmission | null = null;
+  private transmissionStart = 0;
 
   constructor() {
     super("Shift");
@@ -62,6 +66,9 @@ export class ShiftScene extends Phaser.Scene {
     eventBus.on("world:snapshot", onSnapshot);
     eventBus.on("analytics:report", onReport);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      // A transmission still open when the shift ends is discarded.
+      void this.transmission?.stop();
+      this.transmission = null;
       this.world?.stop();
       this.world = null;
       eventBus.off("world:snapshot", onSnapshot);
@@ -108,6 +115,24 @@ export class ShiftScene extends Phaser.Scene {
       .setStrokeStyle(2, 0xffd166, 0.7)
       .setDepth(10)
       .setVisible(false);
+
+    // Push-to-talk: hold Space to radio in, release to send.
+    this.transmittingText = this.add
+      .text(660, 10, "● TRANSMITTING", {
+        color: "#ff5555",
+        fontFamily: "monospace",
+        fontSize: "14px",
+      })
+      .setOrigin(0.5, 0)
+      .setVisible(false);
+    const talkKey = this.input.keyboard?.addKey(
+      Phaser.Input.Keyboard.KeyCodes.SPACE,
+    );
+    talkKey?.on("down", () => this.startTransmission());
+    talkKey?.on("up", () => void this.endTransmission());
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (talkKey) this.input.keyboard?.removeKey(talkKey, true);
+    });
 
     eventBus.emit("shift:start", {
       level: this.level,
@@ -177,6 +202,29 @@ export class ShiftScene extends Phaser.Scene {
     if (this.ended || this.flagged.has(npcId)) return;
     this.flagged.add(npcId);
     eventBus.emit("flag:created", { t: this.t, npcId, cameraId });
+  }
+
+  private startTransmission(): void {
+    if (this.ended || this.transmission) return;
+    this.transmission = startListening();
+    this.transmissionStart = this.t;
+    this.transmittingText.setVisible(true);
+  }
+
+  private async endTransmission(): Promise<void> {
+    const transmission = this.transmission;
+    if (!transmission) return;
+    this.transmission = null;
+    this.transmittingText.setVisible(false);
+    const t = this.transmissionStart;
+    const text = await transmission.stop();
+    if (!text) return;
+    console.info(`[radio] ${text}`);
+    eventBus.emit("radio:report", {
+      text,
+      t,
+      provider: transmission.provider ?? "browser",
+    });
   }
 
   /** Jumps straight to the next level's shift, without a debrief. */

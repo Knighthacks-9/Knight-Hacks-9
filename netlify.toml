@@ -1,0 +1,16 @@
+# Netlify hosts the game plus the voice proxy functions in netlify/functions.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Serve from the site root (the GitHub Pages build uses /Knight-Hacks-9/).
+[build.environment]
+  BASE_PATH = "/"
+
+# `npm run dev:netlify`: Vite on 5173 behind Netlify's dev server on 8888,
+# which also runs the functions at /api/*.
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
+  framework = "#custom"

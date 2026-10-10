@@ -127,6 +127,21 @@ export interface Flag {
 }
 
 // ---------------------------------------------------------------------------
+// Audio: radio dispatcher voice and push-to-talk.
+// ---------------------------------------------------------------------------
+
+/** Which service produced speech or a transcript. */
+export type VoiceProvider = "elevenlabs" | "browser";
+
+/** A push-to-talk transmission from the player, transcribed. */
+export interface RadioReport {
+  text: string;
+  /** Shift seconds when the player started talking. */
+  t: number;
+  provider: VoiceProvider;
+}
+
+// ---------------------------------------------------------------------------
 // Analytics (Person 4): the debrief report, built when a shift ends.
 // ---------------------------------------------------------------------------
 
@@ -189,5 +204,6 @@ export type AppEvents = {
   "world:suspiciousEnd": WorldEvent;
   "gaze:sample": GazeSample;
   "flag:created": Flag;
+  "radio:report": RadioReport;
   "analytics:report": ShiftReport;
 };

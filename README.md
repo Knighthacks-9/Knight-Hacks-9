@@ -54,9 +54,45 @@ returns a smoothed canvas point (0..1), `getSource()` reports `tracker`,
 `mouse`, or `none`, and `isBlinking()` reports blinks. Gaze is held for up to
 350 ms through blinks and dropped frames before falling back to the mouse.
 
+### Radio voice (ElevenLabs)
+
+The dispatcher voice and push-to-talk use ElevenLabs, with the free browser
+speech APIs as an automatic fallback. During a shift, **hold Space** to radio
+in and release to send; a `● TRANSMITTING` indicator shows while you talk, and
+the transcript is published on the event bus as `radio:report`.
+
+The ElevenLabs key never reaches the browser. Two Netlify Functions proxy the
+API: `/api/tts` (text to speech, max 500 characters) and `/api/stt`
+(speech to text with the `scribe_v2` model). ElevenLabs error codes pass
+through; after a 401 (bad key) or 429 (out of credits) the game uses browser
+speech for the rest of the session. The browser console logs which provider
+handled each line (`[voice] TTS provider: …`).
+
+**Set up the keys.** Copy `.env.example` to `.env` (git-ignored) and fill in
+`ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`. On Netlify, add the same two
+variables under Site configuration → Environment variables.
+
+**Run with the functions locally.** `npm run dev:netlify` starts Netlify's
+dev server (via `npx netlify-cli`) at <http://localhost:8888>, which serves the
+Vite app and the functions and reads `.env`. Plain `npm run dev` has no
+functions, so voice falls back to the browser APIs.
+
+**Save credits.** Add `?voice=free` to the URL to skip ElevenLabs entirely.
+
+**Pre-generate dispatcher lines.** `npm run voice:generate` reads
+`scripts/voice-lines.json` and writes `public/audio/dispatch_<id>.mp3` using
+the key in `.env`. Existing files are skipped, so re-running only pays for new
+or deleted lines. Play one in code with `playDispatchLine(id, text)` from
+`src/audio`, which costs nothing and falls back to `speak(text)`.
+
+Voice needs Netlify (or `npm run dev:netlify`). The GitHub Pages build has no
+functions, so there it always uses the browser fallbacks.
+
 ## Scripts
 
 - `npm run dev` — start the Vite development server
+- `npm run dev:netlify` — run Vite plus the voice functions (Netlify dev)
+- `npm run voice:generate` — pre-generate dispatcher lines with ElevenLabs
 - `npm run build` — type-check and create the production build
 - `npm run preview` — serve the production build locally
 - `npm run lint` — run ESLint
@@ -66,13 +102,14 @@ returns a smoothed canvas point (0..1), `getSource()` reports `tracker`,
 
 ## Team ownership
 
-| Folder           | Owner    | What lives there                                                          |
-| ---------------- | -------- | ------------------------------------------------------------------------- |
-| `src/vision/`    | Person 1 | Webcam, MediaPipe tracking, gaze model, calibration scene, mouse fallback |
-| `src/world/`     | Person 2 | Map, cameras, A\* pathfinding, NPC routines and suspicious behaviors      |
-| `src/game/`      | Person 3 | Title, Shift, and Debrief scenes, camera feeds, levels                    |
-| `src/analytics/` | Person 4 | Shift logging, catch/miss classification, debrief report and panel        |
-| `src/shared/`    | Everyone | `types.ts` (the contract) and `eventBus.ts`                               |
+| Folder           | Owner    | What lives there                                                           |
+| ---------------- | -------- | -------------------------------------------------------------------------- |
+| `src/vision/`    | Person 1 | Webcam, MediaPipe tracking, gaze model, calibration scene, mouse fallback  |
+| `src/world/`     | Person 2 | Map, cameras, A\* pathfinding, NPC routines and suspicious behaviors       |
+| `src/game/`      | Person 3 | Title, Shift, and Debrief scenes, camera feeds, levels                     |
+| `src/analytics/` | Person 4 | Shift logging, catch/miss classification, debrief report and panel         |
+| `src/audio/`     | Shared   | Dispatcher voice and push-to-talk (`netlify/functions` proxies ElevenLabs) |
+| `src/shared/`    | Everyone | `types.ts` (the contract) and `eventBus.ts`                                |
 
 `src/main.ts` boots Phaser, registers the scenes, installs analytics, and
 attaches the mouse fallback.
