@@ -18,6 +18,18 @@ Open the local URL printed by Vite. From Calibration, adjust gaze sensitivity
 and smoothing, enable or disable mouse fallback, or run the five-point gaze
 calibration. Settings and calibration samples are saved in browser storage.
 
+Select **Enable webcam** on Calibration and grant camera permission to start
+MediaPipe Face Landmarker and the independent BlazeFace detector. On first use,
+the browser downloads the MediaPipe WASM runtime and both models; an internet
+connection is required. Webcam frames are analyzed locally in the browser and
+are not uploaded. The camera requests auto-gain control and a higher-resolution
+stream where supported; low-light frames are brightened for detection without
+changing the visible preview. This can help in dim rooms but cannot replace
+light on your face. A mirrored live preview appears in the lower-right corner
+while the camera is active and disappears when it is stopped. A face box is
+shown whenever either detector finds a face. Use **Eye debug** in the preview
+to show eye corners and iris markers. Camera access requires HTTPS or localhost.
+
 ## Scripts
 
 - `npm run dev` — start the Vite development server
@@ -30,9 +42,8 @@ calibration. Settings and calibration samples are saved in browser storage.
 
 ## Team ownership
 
-- **Person 1 — Vision:** `src/vision/` — gaze mapping, calibration, tuning, and
-  mouse fallback; tracker samples can be supplied through the shared
-  `gazeController`
+- **Person 1 — Vision:** `src/vision/` — webcam capture, MediaPipe face/eye
+  tracking, gaze mapping, calibration, tuning, and mouse fallback
 - **Person 2 — World:** `src/world/` — map, NPC, and pathfinding placeholder
 - **Person 3 — Game:** `src/game/` — Phaser scenes and scene-flow placeholder
 - **Person 4 — Analytics:** `src/analytics/` — logging, scoring, and debrief

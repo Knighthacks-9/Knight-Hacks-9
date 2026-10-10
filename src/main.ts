@@ -11,7 +11,7 @@ const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: "app",
   width: 960,
-  hehight: 540,
+  height: 540,
   backgroundColor: "#10131b",
   scene: [TitleScene],
 });

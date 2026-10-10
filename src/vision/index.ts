@@ -111,6 +111,7 @@ export class GazeController {
   private trackerPoint: GazePoint | null = null;
   private smoothedPoint: GazePoint | null = null;
   private transform: CalibrationTransform | null = null;
+  private lastSource: "tracker" | "mouse" | "none" = "none";
 
   constructor(private settings: GazeSettings = { ...DEFAULT_GAZE_SETTINGS }) {}
 
@@ -150,6 +151,12 @@ export class GazeController {
     this.trackerPoint = point;
   }
 
+  getTrackerPoint(): GazePoint | null {
+    return this.isValidPoint(this.trackerPoint)
+      ? { ...this.trackerPoint }
+      : null;
+  }
+
   getSource(): "tracker" | "mouse" | "none" {
     if (this.isValidPoint(this.trackerPoint)) return "tracker";
     if (this.settings.useMouseFallback && this.isValidPoint(this.mousePoint)) {
@@ -165,8 +172,17 @@ export class GazeController {
   }
 
   getPoint(): GazePoint | null {
+    const source = this.getSource();
+    if (source !== this.lastSource) {
+      this.smoothedPoint = null;
+      this.lastSource = source;
+    }
+
     const rawPoint = this.getRawPoint();
-    if (!rawPoint) return null;
+    if (!rawPoint) {
+      this.smoothedPoint = null;
+      return null;
+    }
 
     const calibrated = this.transform
       ? applyCalibration(this.transform, rawPoint)

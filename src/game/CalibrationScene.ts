@@ -7,6 +7,11 @@ import {
   type GazePoint,
   type GazeSettings,
 } from "../vision";
+import {
+  mediaPipeGazeTracker,
+  type TrackerPhase,
+  type TrackerStatus,
+} from "../vision/MediaPipeGazeTracker";
 import { eventBus } from "../shared/eventBus";
 
 const SETTINGS_KEY = "night-watch:gaze-settings";
@@ -92,12 +97,15 @@ export class CalibrationScene extends Phaser.Scene {
   private smoothingText!: Phaser.GameObjects.Text;
   private fallbackText!: Phaser.GameObjects.Text;
   private statusText!: Phaser.GameObjects.Text;
+  private cameraInfoText!: Phaser.GameObjects.Text;
+  private cameraButtonText!: Phaser.GameObjects.Text;
   private target!: Phaser.GameObjects.Container;
   private progressText!: Phaser.GameObjects.Text;
   private instructionText!: Phaser.GameObjects.Text;
   private debugText!: Phaser.GameObjects.Text;
   private debugPanel!: Phaser.GameObjects.Rectangle;
   private cursor!: Phaser.GameObjects.Arc;
+  private removeTrackerListener: (() => void) | null = null;
 
   constructor() {
     super("Calibration");
@@ -168,6 +176,23 @@ export class CalibrationScene extends Phaser.Scene {
     this.addButton(520, 306, "−", () => this.adjustSetting("smoothing", -0.1));
     this.addButton(574, 306, "+", () => this.adjustSetting("smoothing", 0.1));
     this.addButton(520, 366, "Toggle", () => this.toggleFallback());
+    this.cameraButtonText = this.addButton(
+      710,
+      236,
+      "Enable webcam",
+      () => this.toggleWebcam(),
+      160,
+    );
+    this.cameraInfoText = this.add
+      .text(710, 278, "", {
+        color: "#9ca3af",
+        fontFamily: "Arial, sans-serif",
+        fontSize: "12px",
+        align: "center",
+        wordWrap: { width: 160 },
+        lineSpacing: 2,
+      })
+      .setOrigin(0.5, 0);
 
     this.add
       .text(
@@ -256,24 +281,23 @@ export class CalibrationScene extends Phaser.Scene {
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       this.updateMousePoint(pointer);
     });
-    this.input.on(
-      "pointerdown",
-      (
-        pointer: Phaser.Input.Pointer,
-        currentlyOver: Phaser.GameObjects.GameObject[],
-      ) => {
-        this.updateMousePoint(pointer);
-        if (this.calibrating && currentlyOver.length === 0) {
-          this.captureSample();
-        }
-      },
-    );
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      this.updateMousePoint(pointer);
+    });
     this.input.keyboard?.on("keydown-SPACE", () => {
       if (this.calibrating) this.captureSample();
     });
 
     this.updateSettingsLabels();
     this.updateStatus();
+    this.updateTrackerStatus(mediaPipeGazeTracker.getStatus());
+    this.removeTrackerListener = mediaPipeGazeTracker.onStatusChange((status) =>
+      this.updateTrackerStatus(status),
+    );
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.removeTrackerListener?.();
+      this.removeTrackerListener = null;
+    });
   }
 
   update(): void {
@@ -311,7 +335,7 @@ export class CalibrationScene extends Phaser.Scene {
     label: string,
     callback: () => void,
     width = 46,
-  ): void {
+  ): Phaser.GameObjects.Text {
     const background = this.add
       .rectangle(x, y, width, 38, 0x293141)
       .setStrokeStyle(1, 0x465267)
@@ -328,6 +352,7 @@ export class CalibrationScene extends Phaser.Scene {
     background.on("pointerout", () => background.setFillStyle(0x293141));
     background.on("pointerdown", callback);
     text.setInteractive({ useHandCursor: true }).on("pointerdown", callback);
+    return text;
   }
 
   private adjustSetting(
@@ -361,16 +386,67 @@ export class CalibrationScene extends Phaser.Scene {
 
   private updateStatus(): void {
     const source = this.gaze.getSource();
-    const label =
-      source === "tracker"
-        ? "TRACKER CONNECTED"
-        : this.settings.useMouseFallback
-          ? "MOUSE FALLBACK ENABLED"
-          : "WAITING FOR TRACKER";
+    const phase = mediaPipeGazeTracker.getStatus().phase;
+    const label = this.getStatusLabel(phase, source);
     this.statusText.setText(`●  ${label}`);
     this.statusText.setStyle({
-      color: source === "tracker" ? "#8ee5bd" : "#ffd166",
-      backgroundColor: source === "tracker" ? "#1c302b" : "#332b1d",
+      color:
+        phase === "error"
+          ? "#ff9b9b"
+          : source === "tracker"
+            ? "#8ee5bd"
+            : "#ffd166",
+      backgroundColor:
+        phase === "error"
+          ? "#3b2225"
+          : source === "tracker"
+            ? "#1c302b"
+            : "#332b1d",
+    });
+  }
+
+  private getStatusLabel(
+    phase: TrackerPhase,
+    source: "tracker" | "mouse" | "none",
+  ): string {
+    if (phase === "requesting") return "REQUESTING CAMERA";
+    if (phase === "loading") return "LOADING FACE MODEL";
+    if (phase === "error") return "WEBCAM ERROR";
+    if (phase === "no-face") return "FACE NOT DETECTED";
+    if (phase === "no-eyes") return "EYES NOT TRACKED";
+    if (source === "tracker") return "WEBCAM TRACKER CONNECTED";
+    if (this.settings.useMouseFallback) return "MOUSE FALLBACK ENABLED";
+    return "CAMERA OFF";
+  }
+
+  private updateTrackerStatus(status: TrackerStatus): void {
+    this.cameraInfoText.setText(status.message);
+    this.cameraButtonText.setText(
+      status.phase === "requesting" || status.phase === "loading"
+        ? "Cancel start"
+        : status.phase === "running" ||
+            status.phase === "no-face" ||
+            status.phase === "no-eyes"
+          ? "Stop webcam"
+          : "Enable webcam",
+    );
+    this.updateStatus();
+  }
+
+  private toggleWebcam(): void {
+    const phase = mediaPipeGazeTracker.getStatus().phase;
+    if (
+      phase === "requesting" ||
+      phase === "loading" ||
+      phase === "running" ||
+      phase === "no-face" ||
+      phase === "no-eyes"
+    ) {
+      mediaPipeGazeTracker.stop();
+      return;
+    }
+    void mediaPipeGazeTracker.start().catch(() => {
+      this.updateTrackerStatus(mediaPipeGazeTracker.getStatus());
     });
   }
 
@@ -385,6 +461,16 @@ export class CalibrationScene extends Phaser.Scene {
   }
 
   private startCalibration(): void {
+    if (mediaPipeGazeTracker.getStatus().phase !== "running") {
+      this.statusText.setText(
+        "Enable the webcam and wait for a face sample before calibrating.",
+      );
+      this.statusText.setStyle({
+        color: "#ff9b9b",
+        backgroundColor: "#3b2225",
+      });
+      return;
+    }
     this.calibrating = true;
     this.targetIndex = 0;
     this.samples = [];
@@ -394,10 +480,10 @@ export class CalibrationScene extends Phaser.Scene {
   }
 
   private captureSample(): void {
-    const input = this.gaze.getRawPoint();
+    const input = this.gaze.getTrackerPoint();
     if (!input) {
       this.instructionText.setText(
-        "No gaze sample available. Enable mouse fallback or connect a tracker.",
+        "No eye sample yet. Face the webcam and wait for the tracker, then press SPACE.",
       );
       return;
     }
@@ -438,7 +524,7 @@ export class CalibrationScene extends Phaser.Scene {
       `POINT ${this.targetIndex + 1} OF ${SAMPLE_TARGETS.length}`,
     );
     this.instructionText.setText(
-      "Look at the dot, then press SPACE or click to record.",
+      "Look steadily at the dot, then press SPACE to record your eye position.",
     );
   }
 

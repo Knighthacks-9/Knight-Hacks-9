@@ -42,9 +42,11 @@ describe("gaze controller", () => {
     const controller = new GazeController();
     controller.setMousePoint({ x: 0.2, y: 0.3 });
     expect(controller.getSource()).toBe("mouse");
+    expect(controller.getTrackerPoint()).toBeNull();
 
     controller.setTrackerPoint({ x: 0.8, y: 0.7 });
     expect(controller.getSource()).toBe("tracker");
+    expect(controller.getTrackerPoint()).toEqual({ x: 0.8, y: 0.7 });
     expect(controller.getPoint()).toEqual({ x: 0.8, y: 0.7 });
 
     controller.setTrackerPoint(null);
@@ -66,5 +68,17 @@ describe("gaze controller", () => {
     controller.setMousePoint({ x: 0.8, y: 0.6 });
     expect(controller.getRawPoint()).toEqual({ x: 0.8, y: 0.6 });
     expect(controller.getPoint()).toEqual({ x: 0.5, y: 0.5 });
+  });
+
+  it("resets smoothing when the active gaze source changes", () => {
+    const controller = new GazeController({
+      ...DEFAULT_GAZE_SETTINGS,
+      smoothing: 0.8,
+    });
+    controller.setMousePoint({ x: 0.2, y: 0.4 });
+    controller.getPoint();
+
+    controller.setTrackerPoint({ x: 0.8, y: 0.6 });
+    expect(controller.getPoint()).toEqual({ x: 0.8, y: 0.6 });
   });
 });
