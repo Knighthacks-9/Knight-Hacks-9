@@ -1,15 +1,30 @@
-// TODO: Add the shared attention measurement interface.
-export interface Attention {}
+export type SceneKey = "Title" | "Calibration" | "Shift" | "Debrief";
 
-
-export interface Flag {
-  cameraId: number;
-  npcId: string | null;
-  /** Milliseconds since the shift started. */
-  t: number;
+export interface Attention {
+  scene: SceneKey;
+  focus: number;
+  confidence?: number;
+  timestamp: number;
+  x?: number;
+  y?: number;
+  lookingAtTarget?: boolean;
+  targetId?: string;
 }
 
-export type SceneKey = "Title" | "Calibration" | "Shift" | "Debrief";
+export interface WorldEvent {
+  type: string;
+  label?: string;
+  scene: SceneKey;
+  metadata?: Record<string, unknown>;
+  timestamp: number;
+}
+
+export interface Flag {
+  id: string;
+  value: boolean;
+  scene: SceneKey;
+  timestamp: number;
+}
 
 // ---------------------------------------------------------------------------
 // World (Person 2). All positions are in tile units; multiply by tile size to
@@ -96,6 +111,12 @@ export interface SimTick {
 
 export type AppEvents = {
   "scene:navigate": SceneKey;
+  "vision:attention": Attention;
+  "vision:gaze": Attention;
+  "world:event": WorldEvent;
+  "world:flag": Flag;
+  "analytics:world-event": WorldEvent;
+  "analytics:flag": Flag;
   "sim:tick": SimTick;
   "world:map": WorldMap;
   "world:snapshot": WorldSnapshot;
