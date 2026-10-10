@@ -4,6 +4,7 @@ import type {
   ShiftReport,
   SuspiciousBehavior,
 } from "../shared/types";
+import type { ShiftSummary } from "./history";
 
 const OUTCOME_LABELS: Record<EventOutcome | "false-flag", string> = {
   caught: "Caught",
@@ -67,26 +68,33 @@ interface ChartPoint {
 
 interface LineChartOptions {
   label: string;
-  duration: number;
+  /** X-axis range; points use `t` on this scale (shift seconds by default). */
+  xMin?: number;
+  xMax: number;
+  xTickSteps?: number[];
+  xFormat?: (value: number) => string;
   /** Each run is drawn as its own line, so gaps between runs stay empty. */
   runs: ChartPoint[][];
   unit: string;
   yTickSteps: number[];
+  /** Fixed top of the y-axis (e.g. 100 for percentages); otherwise fits the data. */
+  yMax?: number;
   /** Dashed reference line, e.g. the average. */
   reference?: { value: number; label: string };
-  /** Short vertical markers along the bottom, e.g. when you flagged. */
-  marks?: { t: number; tip: string }[];
 }
 
-/** Inline SVG line chart with time on the x-axis; hover a point for its tip. */
+/** Inline SVG line chart; hover a point for its tip. */
 function lineChart({
   label,
-  duration,
+  xMin = 0,
+  xMax,
+  xTickSteps = [5, 10, 15, 30, 60, 120, 300],
+  xFormat = (t) => `${t}s`,
   runs,
   unit,
   yTickSteps,
+  yMax: fixedYMax,
   reference,
-  marks = [],
 }: LineChartOptions): string {
   const W = 640;
   const H = 200;
@@ -94,12 +102,13 @@ function lineChart({
   const right = 12;
   const top = 12;
   const bottom = 26;
-  const spanX = Math.max(duration, 0.01);
-  const largest = Math.max(0.01, ...runs.flat().map((p) => p.value));
+  const spanX = Math.max(xMax - xMin, 0.01);
+  const largest =
+    fixedYMax ?? Math.max(0.01, ...runs.flat().map((p) => p.value));
   const yStep = tickStep(largest, 4, yTickSteps);
   const yMax = Math.ceil(largest / yStep) * yStep;
-  const xStep = tickStep(spanX, 6, [5, 10, 15, 30, 60, 120, 300]);
-  const x = (t: number) => left + (t / spanX) * (W - left - right);
+  const xStep = tickStep(spanX, 6, xTickSteps);
+  const x = (t: number) => left + ((t - xMin) / spanX) * (W - left - right);
   const y = (v: number) => top + (1 - v / yMax) * (H - top - bottom);
 
   const yTicks: string[] = [];
@@ -109,9 +118,9 @@ function lineChart({
       <text class="tick" x="${left - 6}" y="${y(v)}" text-anchor="end" dominant-baseline="middle">${v}${unit}</text>`);
   }
   const xTicks: string[] = [];
-  for (let t = 0; t <= spanX + 1e-9; t += xStep) {
+  for (let t = xMin; t <= xMax + 1e-9; t += xStep) {
     xTicks.push(
-      `<text class="tick" x="${x(t)}" y="${H - 8}" text-anchor="middle">${t}s</text>`,
+      `<text class="tick" x="${x(t)}" y="${H - 8}" text-anchor="middle">${xFormat(t)}</text>`,
     );
   }
 
@@ -137,16 +146,6 @@ function lineChart({
       </g>`,
     )
     .join("");
-  const markLines = marks
-    .map(
-      (m) => `
-      <g class="chart-mark">
-        <line x1="${x(m.t)}" x2="${x(m.t)}" y1="${top}" y2="${H - bottom}" />
-        <line class="mark-hit" x1="${x(m.t)}" x2="${x(m.t)}" y1="${top}" y2="${H - bottom}" />
-        <title>${m.tip}</title>
-      </g>`,
-    )
-    .join("");
   const ref = reference
     ? `
       <line class="avg" x1="${left}" x2="${W - right}" y1="${y(reference.value)}" y2="${y(reference.value)}" />
@@ -157,7 +156,6 @@ function lineChart({
     <svg class="line-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${label}">
       ${yTicks.join("")}
       ${xTicks.join("")}
-      ${markLines}
       ${ref}
       ${lines}
       ${points}
@@ -177,7 +175,7 @@ function attentionChart(
   const average = spans.reduce((sum, s) => sum + s.seconds, 0) / spans.length;
   return lineChart({
     label: `Attention span over the shift: ${spans.length} spans, average ${seconds(average)}, longest ${seconds(longest)}`,
-    duration,
+    xMax: duration,
     unit: "s",
     yTickSteps: [1, 2, 5, 10, 15, 30, 60, 120],
     runs: [
@@ -191,54 +189,118 @@ function attentionChart(
   });
 }
 
-/** Samples further apart than this start a new line (no suspect was visible in between). */
-const DISTANCE_GAP_SECONDS = 1;
-
-/** Line chart of how far the gaze was from the nearest visible suspect. */
-function distanceChart(report: ShiftReport): string {
-  const runs: ChartPoint[][] = [];
-  let run: ChartPoint[] = [];
-  let lastT = -Infinity;
-  for (const sample of report.gazeDistance) {
-    if (sample.tiles === null || sample.t - lastT > DISTANCE_GAP_SECONDS) {
-      if (run.length) runs.push(run);
-      run = [];
-    }
-    lastT = sample.t;
-    if (sample.tiles === null) continue;
-    run.push({
-      t: sample.t,
-      value: sample.tiles,
-      tip: `${seconds(sample.t)}: ${sample.tiles.toFixed(1)} tiles from the suspect`,
-    });
-  }
-  if (run.length) runs.push(run);
-
-  const values = runs.flat().map((p) => p.value);
-  if (values.length < 2) {
-    return '<p class="empty">No suspect was on your feeds while your gaze was tracked.</p>';
-  }
-  const average = values.reduce((sum, v) => sum + v, 0) / values.length;
-  return lineChart({
-    label: `Distance from your gaze to the nearest suspect: average ${average.toFixed(1)} tiles, closest ${Math.min(...values).toFixed(1)} tiles`,
-    duration: report.duration,
-    unit: "",
-    yTickSteps: [1, 2, 5, 10, 20, 50],
-    runs,
-    reference: { value: average, label: `avg ${average.toFixed(1)} tiles` },
-    marks: report.events
-      .filter((e) => e.flaggedAt !== null)
-      .map((e) => ({
-        t: e.flaggedAt!,
-        tip: `Flagged at ${seconds(e.flaggedAt!)}`,
-      })),
+const when = (at: number) =>
+  new Date(at).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   });
+
+/** "Your progress": trends across saved shifts. The last entry is this shift. */
+function progressSection(history: readonly ShiftSummary[]): string {
+  const numbered = history.map((shift, i) => ({ ...shift, n: i + 1 }));
+  // Early-ended shifts only cover part of a shift, so they stay out of the trend.
+  const completed = numbered.filter((shift) => shift.completed);
+  const current = numbered.at(-1);
+  const earlier = completed.filter((shift) => shift !== current);
+  const best = completed.length
+    ? Math.max(...completed.map((shift) => shift.score))
+    : null;
+  let versus = "—";
+  if (current && !current.completed) versus = "Ended early";
+  else if (current && earlier.length) {
+    const avg =
+      earlier.reduce((sum, shift) => sum + shift.score, 0) / earlier.length;
+    const diff = Math.round(current.score - avg);
+    versus = `${diff >= 0 ? "+" : ""}${diff} vs avg`;
+  }
+
+  const xAxis = {
+    xMin: 1,
+    xMax: Math.max(numbered.length, 2),
+    xTickSteps: [1, 2, 5, 10, 20, 50],
+    xFormat: (n: number) => `#${n}`,
+  };
+  const charts =
+    completed.length < 2
+      ? '<p class="empty">Play another full shift to see your progress.</p>'
+      : `
+        <h4>Score per shift</h4>
+        ${lineChart({
+          ...xAxis,
+          label: `Score over ${completed.length} completed shifts`,
+          unit: "",
+          yTickSteps: [25],
+          yMax: 100,
+          runs: [
+            completed.map((shift) => ({
+              t: shift.n,
+              value: shift.score,
+              tip: `Shift #${shift.n} · Level ${shift.level} · score ${shift.score} · ${when(shift.at)}`,
+            })),
+          ],
+        })}
+        <h4>Catch rate per shift</h4>
+        ${lineChart({
+          ...xAxis,
+          label: `Share of suspects caught over ${completed.length} completed shifts`,
+          unit: "%",
+          yTickSteps: [25],
+          yMax: 100,
+          runs: [
+            completed
+              .filter((shift) => shift.total > 0)
+              .map((shift) => ({
+                t: shift.n,
+                value: Math.round((100 * shift.caught) / shift.total),
+                tip: `Shift #${shift.n} · caught ${shift.caught} of ${shift.total}`,
+              })),
+          ],
+        })}`;
+
+  const rows = numbered
+    .slice(-10)
+    .reverse()
+    .map(
+      (shift) => `
+        <tr>
+          <td>#${shift.n}</td>
+          <td>${when(shift.at)}</td>
+          <td>${shift.level}</td>
+          <td>${shift.score}</td>
+          <td>${shift.caught} / ${shift.total}</td>
+          <td>${shift.falseFlags}</td>
+          <td>${shift.completed ? (shift.passed ? "Passed" : "Not passed") : "Ended early"}</td>
+        </tr>`,
+    )
+    .join("");
+
+  return `
+      <div class="panel-block">
+        <h3>Your progress</h3>
+        <div class="summary-grid">
+          <div class="metric"><span>Shifts played</span><strong>${history.length}</strong></div>
+          <div class="metric"><span>Best score</span><strong>${best ?? "—"}</strong></div>
+          <div class="metric"><span>This shift</span><strong>${versus}</strong></div>
+        </div>
+        ${charts}
+        <h4>Recent shifts</h4>
+        <div class="table-scroll">
+          <table class="history-table">
+            <thead><tr><th>Shift</th><th>When</th><th>Level</th><th>Score</th><th>Caught</th><th>False flags</th><th>Result</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <button type="button" class="history-clear" data-action="clear-history">Clear history</button>
+      </div>`;
 }
 
 /** HTML for the debrief panel. `cameraNames` maps camera ids to display names. */
 export function buildDebriefMarkup(
   report: ShiftReport,
   cameraNames: ReadonlyMap<string, string> = new Map(),
+  history: readonly ShiftSummary[] = [],
 ): string {
   const name = (id: string | null) =>
     id === null ? "Off feeds" : (cameraNames.get(id) ?? id);
@@ -347,16 +409,11 @@ export function buildDebriefMarkup(
       </div>
 
       <div class="panel-block">
-        <h3>Distance from suspect</h3>
-        <p class="meta">How far your gaze was from the nearest suspicious person on your feeds, in building tiles. Lower is closer; gaps mean no suspect was visible or you looked off the feeds. Dashed lines mark when you flagged someone.</p>
-        ${distanceChart(report)}
-      </div>
-
-      <div class="panel-block">
         <h3>Timeline</h3>
         <p class="meta">Bright bars: where you were looking. Coloured windows: suspicious behavior on that feed.</p>
         <div class="timeline">${lanes}</div>
       </div>
+${history.length ? progressSection(history) : ""}
     </section>
   `;
 }

@@ -17,6 +17,8 @@ import type {
 export const FLAG_GRACE_SECONDS = 5;
 /** Watching the suspect at least this long, without flagging, is "missed while looking". */
 export const LOOKED_SECONDS = 1;
+/** Points taken off the score for each innocent person flagged. */
+export const FALSE_FLAG_PENALTY = 5;
 /** Gaps between gaze samples longer than this (e.g. a paused tab) are not counted. */
 const MAX_SAMPLE_GAP = 0.5;
 /** Gaze-to-suspect distance is logged at most this often (4 Hz). */
@@ -223,17 +225,19 @@ export function createShiftAnalytics(): ShiftAnalytics {
 
       const caught = classified.filter((e) => e.outcome === "caught").length;
       const total = classified.length;
-      // Ending the shift early forfeits it, even if nothing had happened yet.
-      const score = !end.completed
-        ? 0
-        : Math.max(
-            0,
-            Math.min(
-              100,
-              Math.round(total > 0 ? (100 * caught) / total : 100) -
-                10 * falseFlags.length,
-            ),
-          );
+      // Catching nobody scores 0 (even if nobody suspicious appeared), ending
+      // early or not; otherwise it's the share caught minus false flags.
+      const score =
+        caught === 0
+          ? 0
+          : Math.max(
+              0,
+              Math.min(
+                100,
+                Math.round((100 * caught) / total) -
+                  FALSE_FLAG_PENALTY * falseFlags.length,
+              ),
+            );
       const passed =
         end.completed &&
         caught >= Math.ceil(total / 2) &&

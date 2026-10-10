@@ -9,11 +9,44 @@ import type {
 } from "../shared/types";
 import { startWorld } from "../world";
 import {
+  MAX_HISTORY,
+  appendHistory,
   attentionSpans,
   buildDebriefMarkup,
+  clearHistory,
   createShiftAnalytics,
   installAnalytics,
+  loadHistory,
+  summarize,
+  type HistoryStorage,
+  type ShiftSummary,
 } from ".";
+
+/** In-memory stand-in for localStorage. */
+function memoryStorage(): HistoryStorage & { data: Map<string, string> } {
+  const data = new Map<string, string>();
+  return {
+    data,
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => void data.set(key, value),
+    removeItem: (key) => void data.delete(key),
+  };
+}
+
+const summary = (overrides: Partial<ShiftSummary> = {}): ShiftSummary => ({
+  at: 0,
+  level: 1,
+  score: 50,
+  passed: true,
+  completed: true,
+  caught: 1,
+  total: 2,
+  falseFlags: 0,
+  duration: 120,
+  avgSpan: null,
+  avgDistance: null,
+  ...overrides,
+});
 
 const event = (
   id: string,
@@ -98,7 +131,7 @@ describe("shift analytics", () => {
     expect(outcome("ev2")).toBe("missed-looking");
     expect(outcome("ev3")).toBe("missed-not-looking");
     expect(report.falseFlags).toHaveLength(1);
-    expect(report.score).toBe(23); // 1 of 3 caught, minus 10 for the false flag
+    expect(report.score).toBe(28); // 1 of 3 caught, minus 5 for the false flag
     expect(report.passed).toBe(false);
 
     const cam2 = report.feeds.find((f) => f.cameraId === "cam2")!;
@@ -134,12 +167,26 @@ describe("shift analytics", () => {
     expect(buildDebriefMarkup(report)).toContain("Caught");
   });
 
-  it("scores 0 when the shift is ended early", () => {
+  it("scores 0 when nobody was caught, even if nobody appeared", () => {
     const analytics = createShiftAnalytics();
     analytics.startShift({ level: 1, shiftSeconds: 60, cameraIds: ["cam1"] });
+    expect(analytics.endShift({ t: 60, completed: true }).score).toBe(0);
 
-    const report = analytics.endShift({ t: 1, completed: false });
-    expect(report.score).toBe(0);
+    analytics.startShift({ level: 1, shiftSeconds: 60, cameraIds: ["cam1"] });
+    analytics.recordEventStart(event("ev1", "npc1", 1));
+    expect(analytics.endShift({ t: 1, completed: false }).score).toBe(0);
+  });
+
+  it("still scores catches when the shift is ended early, but doesn't pass", () => {
+    const analytics = createShiftAnalytics();
+    analytics.startShift({ level: 1, shiftSeconds: 60, cameraIds: ["cam1"] });
+    analytics.recordEventStart(event("ev1", "npc1", 1));
+    analytics.recordEventStart(event("ev2", "npc2", 2));
+    analytics.recordFlag({ t: 3, npcId: "npc1", cameraId: "cam1" });
+    analytics.recordFlag({ t: 4, npcId: "innocent", cameraId: "cam1" });
+
+    const report = analytics.endShift({ t: 5, completed: false });
+    expect(report.score).toBe(45); // 1 of 2 caught, minus 5 for the false flag
     expect(report.passed).toBe(false);
   });
 });
@@ -222,7 +269,8 @@ describe("gaze distance from suspects", () => {
 describe("analytics on the event bus", () => {
   it("scores a simulated shift from the real world module", () => {
     const bus = mitt<AppEvents>();
-    const stop = installAnalytics({ bus });
+    const storage = memoryStorage();
+    const stop = installAnalytics({ bus, storage });
     const reports: ShiftReport[] = [];
     bus.on("analytics:report", (r) => reports.push(r));
     let latest: WorldSnapshot | null = null;
@@ -260,6 +308,7 @@ describe("analytics on the event bus", () => {
     stop();
 
     expect(reports).toHaveLength(1);
+    expect(loadHistory(storage)).toHaveLength(1);
     const [report] = reports;
     expect(report.falseFlags).toHaveLength(0);
     expect(
@@ -273,5 +322,86 @@ describe("analytics on the event bus", () => {
         e.cameraIds.includes("cam2") && e.flaggedAt !== null,
       );
     }
+  });
+});
+
+describe("shift history", () => {
+  it("summarizes a report, with null averages when there is no gaze data", () => {
+    const analytics = createShiftAnalytics();
+    analytics.startShift({ level: 3, shiftSeconds: 60, cameraIds: ["cam1"] });
+    analytics.recordEventStart(event("ev1", "npc1", 1));
+    analytics.recordFlag({ t: 2, npcId: "npc1", cameraId: "cam1" });
+    const empty = summarize(analytics.endShift({ t: 60, completed: true }), 5);
+    expect(empty).toMatchObject({
+      at: 5,
+      level: 3,
+      caught: 1,
+      total: 1,
+      score: 100,
+    });
+    expect(empty.avgSpan).toBeNull();
+    expect(empty.avgDistance).toBeNull();
+
+    analytics.startShift({
+      level: 1,
+      shiftSeconds: 60,
+      cameraIds: ["cam1", "cam2"],
+    });
+    look(analytics, "cam1", 0, 4);
+    look(analytics, "cam2", 4.1, 6);
+    const watched = summarize(analytics.endShift({ t: 6, completed: true }));
+    expect(watched.avgSpan).toBeCloseTo(3, 0);
+  });
+
+  it("saves, caps, and clears history, surviving bad storage", () => {
+    const storage = memoryStorage();
+    for (let i = 0; i < MAX_HISTORY + 5; i++) {
+      appendHistory(summary({ score: i }), storage);
+    }
+    const history = loadHistory(storage);
+    expect(history).toHaveLength(MAX_HISTORY);
+    expect(history[0].score).toBe(5);
+
+    clearHistory(storage);
+    expect(loadHistory(storage)).toEqual([]);
+
+    storage.setItem("night-watch:shift-history", "not json");
+    expect(loadHistory(storage)).toEqual([]);
+
+    const broken: HistoryStorage = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+    };
+    expect(loadHistory(broken)).toEqual([]);
+    expect(() => clearHistory(broken)).not.toThrow();
+  });
+
+  it("charts progress over completed shifts only", () => {
+    const analytics = createShiftAnalytics();
+    analytics.startShift({ level: 1, shiftSeconds: 60, cameraIds: ["cam1"] });
+    const report = analytics.endShift({ t: 60, completed: true });
+
+    expect(buildDebriefMarkup(report)).not.toContain("Your progress");
+    expect(buildDebriefMarkup(report, new Map(), [summary()])).toContain(
+      "Play another full shift",
+    );
+
+    const markup = buildDebriefMarkup(report, new Map(), [
+      summary({ score: 40 }),
+      summary({ score: 0, completed: false, passed: false }),
+      summary({ score: 80 }),
+    ]);
+    expect(markup).toContain("Your progress");
+    expect(markup).toContain("+40 vs avg");
+    expect(markup).toContain("Ended early");
+    // Two completed shifts, each a point on the score and catch-rate charts.
+    expect(markup.match(/Shift #\d+ · /g)).toHaveLength(4);
   });
 });

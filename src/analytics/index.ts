@@ -8,6 +8,13 @@ import type { Emitter } from "mitt";
 import { eventBus } from "../shared/eventBus";
 import type { AppEvents, ShiftReport } from "../shared/types";
 import { buildDebriefMarkup } from "./debriefPanel";
+import {
+  appendHistory,
+  clearHistory,
+  loadHistory,
+  summarize,
+  type HistoryStorage,
+} from "./history";
 import { createShiftAnalytics } from "./shiftAnalytics";
 
 export {
@@ -17,6 +24,16 @@ export {
   type AttentionSpan,
 } from "./debriefPanel";
 export {
+  MAX_HISTORY,
+  appendHistory,
+  clearHistory,
+  loadHistory,
+  summarize,
+  type HistoryStorage,
+  type ShiftSummary,
+} from "./history";
+export {
+  FALSE_FLAG_PENALTY,
   FLAG_GRACE_SECONDS,
   LOOKED_SECONDS,
   createShiftAnalytics,
@@ -27,12 +44,15 @@ export interface AnalyticsOptions {
   bus?: Emitter<AppEvents>;
   /** Element id for the HTML debrief panel, shown only on the Debrief scene. */
   panelId?: string;
+  /** Where shift history is saved; defaults to localStorage. */
+  storage?: HistoryStorage;
 }
 
 /** Starts listening. Returns a function that stops it. */
 export function installAnalytics({
   bus = eventBus,
   panelId = "analytics-panel",
+  storage,
 }: AnalyticsOptions = {}): () => void {
   const analytics = createShiftAnalytics();
   const cameraNames = new Map<string, string>();
@@ -61,6 +81,7 @@ export function installAnalytics({
   listen("flag:created", analytics.recordFlag);
   listen("shift:end", (end) => {
     report = analytics.endShift(end);
+    appendHistory(summarize(report), storage);
     bus.emit("analytics:report", report);
   });
   listen("scene:navigate", (scene) => {
@@ -69,8 +90,30 @@ export function installAnalytics({
     if (!panel) return;
     const show = scene === "Debrief" && report !== null;
     panel.hidden = !show;
-    panel.innerHTML = show ? buildDebriefMarkup(report!, cameraNames) : "";
+    if (show) renderPanel(panel, report!);
+    else panel.innerHTML = "";
   });
+
+  function renderPanel(panel: HTMLElement, shown: ShiftReport) {
+    panel.innerHTML = buildDebriefMarkup(
+      shown,
+      cameraNames,
+      loadHistory(storage),
+    );
+    // Two clicks to clear, so one stray click can't wipe the history.
+    const clear = panel.querySelector<HTMLButtonElement>(
+      '[data-action="clear-history"]',
+    );
+    clear?.addEventListener("click", () => {
+      if (clear.dataset.armed) {
+        clearHistory(storage);
+        renderPanel(panel, shown);
+      } else {
+        clear.dataset.armed = "true";
+        clear.textContent = "Click again to clear";
+      }
+    });
+  }
 
   return () => stops.forEach((stop) => stop());
 }
