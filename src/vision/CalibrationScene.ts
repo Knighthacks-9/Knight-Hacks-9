@@ -15,6 +15,7 @@ import {
   type TrackerPhase,
   type TrackerStatus,
 } from "./index";
+import { playSfx } from "../audio";
 import { eventBus } from "../shared/eventBus";
 
 const SETTINGS_KEY = "night-watch:gaze-settings";
@@ -115,18 +116,21 @@ export class CalibrationScene extends Phaser.Scene {
   private cameraButtonText!: Phaser.GameObjects.Text;
   private calibrationInfoText!: Phaser.GameObjects.Text;
   private debugButtonText!: Phaser.GameObjects.Text;
+  private previewButtonText!: Phaser.GameObjects.Text;
   private target!: Phaser.GameObjects.Container;
   private targetRing!: Phaser.GameObjects.Arc;
   private introText!: Phaser.GameObjects.Text;
   private progressText!: Phaser.GameObjects.Text;
   private warningText!: Phaser.GameObjects.Text;
   private testPanels: Phaser.GameObjects.Rectangle[] = [];
+  private activePanel = -1;
   private testHintText!: Phaser.GameObjects.Text;
   private validationGraphics!: Phaser.GameObjects.Graphics;
   private debugText!: Phaser.GameObjects.Text;
   private debugPanel!: Phaser.GameObjects.Rectangle;
   private cursor!: Phaser.GameObjects.Container;
   private removeTrackerListener: (() => void) | null = null;
+  private removePreviewListener: (() => void) | null = null;
 
   constructor() {
     super("Calibration");
@@ -140,6 +144,7 @@ export class CalibrationScene extends Phaser.Scene {
     this.debugVisible = false;
     this.lastSource = "none";
     this.testPanels = [];
+    this.activePanel = -1;
     this.settings = readSettings();
     this.gaze.setSettings(this.settings);
     if (!this.gaze.isCalibrated()) this.gaze.setModel(loadGazeModel());
@@ -159,10 +164,14 @@ export class CalibrationScene extends Phaser.Scene {
       if (this.mode === "calibrating") {
         this.cancelCalibration("Calibration cancelled.");
       } else if (this.mode === "testing") {
+        playSfx("click");
         this.setMode("setup");
       }
     });
-    this.input.keyboard?.on("keydown-D", () => this.toggleDebug());
+    this.input.keyboard?.on("keydown-D", () => {
+      playSfx("click");
+      this.toggleDebug();
+    });
 
     this.setMode("setup");
     this.updateSettingsLabels();
@@ -170,9 +179,15 @@ export class CalibrationScene extends Phaser.Scene {
     this.removeTrackerListener = mediaPipeGazeTracker.onStatusChange((status) =>
       this.updateTrackerStatus(status),
     );
+    this.updatePreviewLabel();
+    this.removePreviewListener = mediaPipeGazeTracker.onPreviewHiddenChange(
+      () => this.updatePreviewLabel(),
+    );
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.removeTrackerListener?.();
       this.removeTrackerListener = null;
+      this.removePreviewListener?.();
+      this.removePreviewListener = null;
       this.run = null;
       mediaPipeGazeTracker.setPreviewVisible(true);
     });
@@ -320,6 +335,16 @@ export class CalibrationScene extends Phaser.Scene {
       "Debug overlay: OFF",
       () => this.toggleDebug(),
       190,
+    );
+    this.previewButtonText = this.addButton(
+      width / 2,
+      height - 42,
+      "Camera preview: SHOWN",
+      () =>
+        mediaPipeGazeTracker.setPreviewHidden(
+          !mediaPipeGazeTracker.isPreviewHidden(),
+        ),
+      210,
     );
     this.addButton(
       width - 125,
@@ -504,8 +529,12 @@ export class CalibrationScene extends Phaser.Scene {
       .setOrigin(0.5);
     background.on("pointerover", () => background.setFillStyle(0x364156));
     background.on("pointerout", () => background.setFillStyle(0x293141));
-    background.on("pointerdown", callback);
-    text.setInteractive({ useHandCursor: true }).on("pointerdown", callback);
+    const press = () => {
+      playSfx("click");
+      callback();
+    };
+    background.on("pointerdown", press);
+    text.setInteractive({ useHandCursor: true }).on("pointerdown", press);
     return text;
   }
 
@@ -591,6 +620,12 @@ export class CalibrationScene extends Phaser.Scene {
     return "CAMERA OFF";
   }
 
+  private updatePreviewLabel(): void {
+    this.previewButtonText.setText(
+      `Camera preview: ${mediaPipeGazeTracker.isPreviewHidden() ? "HIDDEN" : "SHOWN"}`,
+    );
+  }
+
   private updateTrackerStatus(status: TrackerStatus): void {
     this.cameraInfoText.setText(status.message);
     this.cameraButtonText.setText(
@@ -661,6 +696,7 @@ export class CalibrationScene extends Phaser.Scene {
 
   private startCalibration(): void {
     if (mediaPipeGazeTracker.getStatus().phase !== "running") {
+      playSfx("error");
       this.setMode("setup");
       this.setStatusPill(
         "Enable the webcam and wait until it tracks both eyes, then calibrate.",
@@ -676,6 +712,7 @@ export class CalibrationScene extends Phaser.Scene {
       lastFrameTime: -1,
       samples: [],
     };
+    playSfx("start");
     this.setMode("calibrating");
     this.introText.setVisible(true);
     this.target.setVisible(false);
@@ -698,6 +735,7 @@ export class CalibrationScene extends Phaser.Scene {
           .setVisible(true)
           .setPosition(target.x * width, target.y * height);
         this.updateProgress(run);
+        playSfx("tick");
         this.enterPhase(run, "settle", now);
         return;
 
@@ -709,7 +747,10 @@ export class CalibrationScene extends Phaser.Scene {
           Phaser.Math.Linear(previous.x, target.x, t) * width,
           Phaser.Math.Linear(previous.y, target.y, t) * height,
         );
-        if (elapsed >= MOVE_MS) this.enterPhase(run, "settle", now);
+        if (elapsed >= MOVE_MS) {
+          playSfx("tick");
+          this.enterPhase(run, "settle", now);
+        }
         return;
       }
 
@@ -735,9 +776,10 @@ export class CalibrationScene extends Phaser.Scene {
           1,
         );
         this.targetRing.setScale(1 - 0.75 * progress);
-        this.warningText.setVisible(
-          elapsed > STALL_WARNING_MS && run.pointSamples < MIN_POINT_SAMPLES,
-        );
+        const stalled =
+          elapsed > STALL_WARNING_MS && run.pointSamples < MIN_POINT_SAMPLES;
+        if (stalled && !this.warningText.visible) playSfx("warning");
+        this.warningText.setVisible(stalled);
         if (elapsed >= COLLECT_MS && run.pointSamples >= MIN_POINT_SAMPLES) {
           this.advanceCalibration(run, now);
         }
@@ -770,6 +812,7 @@ export class CalibrationScene extends Phaser.Scene {
       this.finishCalibration(run.samples);
       return;
     }
+    playSfx("capture");
     this.updateProgress(run);
     this.enterPhase(run, "move", now);
   }
@@ -778,6 +821,7 @@ export class CalibrationScene extends Phaser.Scene {
     this.run = null;
     const model = fitGazeModel(samples);
     if (!model) {
+      playSfx("error");
       this.setMode("setup");
       this.setStatusPill(
         "Calibration could not be fitted. Add light, sit centered, and try again.",
@@ -786,12 +830,14 @@ export class CalibrationScene extends Phaser.Scene {
       return;
     }
     this.gaze.setModel(model);
+    playSfx("success");
     this.saveFailed = !saveGazeModel(model);
     this.updateCalibrationInfo();
     this.startTest();
   }
 
   private cancelCalibration(message: string): void {
+    playSfx("cancel");
     this.run = null;
     this.setMode("setup");
     this.setStatusPill(message, "warn");
@@ -800,10 +846,12 @@ export class CalibrationScene extends Phaser.Scene {
   private startTest(): void {
     const model = this.gaze.getModel();
     if (!model) {
+      playSfx("error");
       this.setStatusPill("Calibrate first, then test your gaze.", "error");
       return;
     }
     this.drawValidation(model);
+    this.activePanel = -1;
     this.setMode("testing");
   }
 
@@ -824,6 +872,10 @@ export class CalibrationScene extends Phaser.Scene {
           columns - 1,
         )
       : -1;
+    if (active !== this.activePanel) {
+      this.activePanel = active;
+      if (active >= 0) playSfx("blip");
+    }
     this.testPanels.forEach((panel, index) => {
       const on = index === active;
       panel.setFillStyle(on ? 0x1f3b33 : 0x1b202b);

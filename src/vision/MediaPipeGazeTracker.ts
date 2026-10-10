@@ -9,6 +9,7 @@ import {
   EYE_LANDMARKS,
   extractGazeFeatures,
 } from "./gazeFeatures";
+import { playSfx } from "../audio/sfx";
 import { gazeController } from "./gazeController";
 
 export type TrackerPhase =
@@ -40,6 +41,7 @@ const FACE_DETECTOR_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const PREVIEW_POSITION_KEY = "night-watch:camera-preview-position";
+const PREVIEW_HIDDEN_KEY = "night-watch:camera-preview-hidden";
 const PREVIEW_MARGIN = 8;
 
 interface PreviewPosition {
@@ -68,6 +70,37 @@ function savePreviewPosition(position: PreviewPosition | null): void {
   } catch (error) {
     console.error("Could not save the camera preview position.", error);
   }
+}
+
+function readPreviewHidden(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(PREVIEW_HIDDEN_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function savePreviewHidden(hidden: boolean): void {
+  try {
+    localStorage.setItem(PREVIEW_HIDDEN_KEY, String(hidden));
+  } catch (error) {
+    console.error("Could not save the camera preview setting.", error);
+  }
+}
+
+function previewButton(label: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  Object.assign(button.style, {
+    padding: "6px 9px",
+    border: "0",
+    borderRadius: "6px",
+    background: "#8b5cf6",
+    color: "white",
+    cursor: "pointer",
+  });
+  return button;
 }
 
 export function faceBoxFromLandmarks(
@@ -183,6 +216,10 @@ export class MediaPipeGazeTracker {
   private lastBrightness = 1;
   private blinkDetector = new BlinkDetector();
   private previewVisible = true;
+  /** The player's choice to hide the preview, kept across sessions. */
+  private previewHidden = readPreviewHidden();
+  private previewHiddenListeners = new Set<(hidden: boolean) => void>();
+  private showPreviewButton: HTMLButtonElement | null = null;
   private previewPosition: PreviewPosition | null = readPreviewPosition();
   private removePreviewDrag: (() => void) | null = null;
   private rafId = 0;
@@ -297,26 +334,47 @@ export class MediaPipeGazeTracker {
       });
       label.dataset.trackerStatus = "true";
 
-      const stopButton = document.createElement("button");
-      stopButton.type = "button";
-      stopButton.textContent = "Stop camera";
+      const stopButton = previewButton("Stop camera");
       Object.assign(stopButton.style, {
         position: "absolute",
         right: "8px",
         bottom: "8px",
-        padding: "6px 9px",
-        border: "0",
-        borderRadius: "6px",
-        background: "#8b5cf6",
-        color: "white",
-        cursor: "pointer",
       });
-      stopButton.addEventListener("click", () => this.stop());
+      stopButton.addEventListener("click", () => {
+        playSfx("click");
+        this.stop();
+      });
 
-      preview.append(video, overlay, label, stopButton);
-      document.body.append(preview);
+      const hideButton = previewButton("Hide");
+      Object.assign(hideButton.style, {
+        position: "absolute",
+        left: "8px",
+        bottom: "8px",
+      });
+      hideButton.addEventListener("click", () => {
+        playSfx("click");
+        this.setPreviewHidden(true);
+      });
+
+      // Stands in for the hidden preview so it can be brought back any time.
+      const showButton = previewButton("Show camera");
+      Object.assign(showButton.style, {
+        position: "fixed",
+        right: "16px",
+        bottom: "16px",
+        zIndex: "99999",
+        boxShadow: "0 4px 16px #0006",
+      });
+      showButton.addEventListener("click", () => {
+        playSfx("click");
+        this.setPreviewHidden(false);
+      });
+
+      preview.append(video, overlay, label, hideButton, stopButton);
+      document.body.append(preview, showButton);
       this.video = video;
       this.preview = preview;
+      this.showPreviewButton = showButton;
       this.overlay = overlay;
       this.applyPreviewVisibility();
       this.enablePreviewDrag(preview);
@@ -429,6 +487,27 @@ export class MediaPipeGazeTracker {
     this.applyPreviewVisibility();
   }
 
+  isPreviewHidden(): boolean {
+    return this.previewHidden;
+  }
+
+  /**
+   * The player's own show/hide choice, saved on this device. Tracking keeps
+   * running while hidden; a small "Show camera" button takes the preview's place.
+   */
+  setPreviewHidden(hidden: boolean): void {
+    if (hidden === this.previewHidden) return;
+    this.previewHidden = hidden;
+    savePreviewHidden(hidden);
+    this.applyPreviewVisibility();
+    for (const listener of this.previewHiddenListeners) listener(hidden);
+  }
+
+  onPreviewHiddenChange(listener: (hidden: boolean) => void): () => void {
+    this.previewHiddenListeners.add(listener);
+    return () => this.previewHiddenListeners.delete(listener);
+  }
+
   /** Lets the player drag the preview anywhere in the window, except by its buttons. */
   private enablePreviewDrag(preview: HTMLDivElement): void {
     let drag: { pointerId: number; offsetX: number; offsetY: number } | null =
@@ -502,8 +581,13 @@ export class MediaPipeGazeTracker {
 
   private applyPreviewVisibility(): void {
     if (!this.preview) return;
-    this.preview.style.opacity = this.previewVisible ? "1" : "0";
-    this.preview.style.pointerEvents = this.previewVisible ? "" : "none";
+    const shown = this.previewVisible && !this.previewHidden;
+    this.preview.style.opacity = shown ? "1" : "0";
+    this.preview.style.pointerEvents = shown ? "" : "none";
+    if (this.showPreviewButton) {
+      this.showPreviewButton.style.display =
+        this.previewVisible && this.previewHidden ? "" : "none";
+    }
   }
 
   private processFrame(generation: number): void {
@@ -734,6 +818,8 @@ export class MediaPipeGazeTracker {
     this.removePreviewDrag = null;
     this.preview?.remove();
     this.preview = null;
+    this.showPreviewButton?.remove();
+    this.showPreviewButton = null;
     this.overlay = null;
     this.blinkDetector.reset();
     gazeController.clearTracker();

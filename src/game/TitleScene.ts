@@ -38,7 +38,7 @@ export class TitleScene extends Phaser.Scene {
     addText(
       this,
       270,
-      "Monitor the camera feeds through the night.\nClick anyone who looks suspicious to flag them.",
+      "Monitor the camera feeds through the night.\nReport anyone acting suspicious to dispatch for investigation.",
       18,
       "#d1d5db",
     );
