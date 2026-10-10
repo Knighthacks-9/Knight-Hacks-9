@@ -81,6 +81,19 @@ export async function playDispatchLine(
   }
 }
 
+/** Cuts off whatever the dispatcher is saying (e.g. when a shift ends). */
+export function stopSpeaking(): void {
+  const audio = currentAudio;
+  if (audio) {
+    audio.pause();
+    // Resolve whoever is waiting on this clip.
+    audio.dispatchEvent(new Event("ended"));
+  }
+  if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+}
+
+let currentAudio: HTMLAudioElement | null = null;
+
 async function playBlob(blob: Blob): Promise<void> {
   const url = URL.createObjectURL(blob);
   try {
@@ -93,9 +106,12 @@ async function playBlob(blob: Blob): Promise<void> {
 }
 
 function finished(audio: HTMLAudioElement): Promise<void> {
-  return new Promise((resolve, reject) => {
+  currentAudio = audio;
+  return new Promise<void>((resolve, reject) => {
     audio.addEventListener("ended", () => resolve(), { once: true });
     audio.addEventListener("error", () => reject(audio.error), { once: true });
+  }).finally(() => {
+    if (currentAudio === audio) currentAudio = null;
   });
 }
 

@@ -123,9 +123,14 @@ export interface GazeSample {
 
 /** The player clicked an NPC on a camera feed. */
 export interface Flag {
+  /** Shift seconds when the report was sent. */
   t: number;
   npcId: string;
   cameraId: string;
+  /** What the player said the person was doing. */
+  behavior?: SuspiciousBehavior;
+  /** The player's spoken follow-up to dispatch, transcribed. */
+  note?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +167,9 @@ export interface ClassifiedEvent {
   /** Seconds the player spent looking at a feed that showed the NPC. */
   watchedSeconds: number;
   flaggedAt: number | null;
+  /** Incident type the player reported, if they reported this person. */
+  reportedBehavior: SuspiciousBehavior | null;
+  reportNote: string | null;
 }
 
 export interface FeedStats {

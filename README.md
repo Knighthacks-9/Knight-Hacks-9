@@ -54,12 +54,31 @@ returns a smoothed canvas point (0..1), `getSource()` reports `tracker`,
 `mouse`, or `none`, and `isBlinking()` reports blinks. Gaze is held for up to
 350 ms through blinks and dropped frames before falling back to the mouse.
 
+### Reporting suspicious people
+
+The side panel in a shift has two tabs. A report only counts once dispatch
+has your spoken description:
+
+1. **REPORT** starts a report. Click the camera feed showing the activity.
+2. Click the person acting suspicious on that feed.
+3. Pick what they are doing (loitering, revisiting doors, restricted zone,
+   avoiding cameras) and **Send report**.
+4. The panel switches to **DISPATCH**. The AI dispatcher acknowledges and asks
+   for a description. Click **TALK**, describe the subject, and click
+   **STOP** (or hold Space while talking). Once your words are transcribed
+   the report is filed (`flag:created`) and dispatch sends a unit.
+
+If dispatch didn't catch anything, it asks you to say again. A report still
+waiting for its follow-up when the shift ends is not counted. The debrief
+shows each report's incident type (✓ or ✗) and your description.
+
 ### Radio voice (ElevenLabs)
 
 The dispatcher voice and push-to-talk use ElevenLabs, with the free browser
-speech APIs as an automatic fallback. During a shift, **hold Space** to radio
-in and release to send; a `● TRANSMITTING` indicator shows while you talk, and
-the transcript is published on the event bus as `radio:report`.
+speech APIs as an automatic fallback. During a shift, use **TALK** in the
+DISPATCH tab or **hold Space**; a `● TRANSMITTING` indicator shows while you
+talk, and each transcript is published on the event bus as `radio:report`.
+Dispatcher lines (text and audio) live in `scripts/voice-lines.json`.
 
 The ElevenLabs key never reaches the browser. Two Netlify Functions proxy the
 API: `/api/tts` (text to speech, max 500 characters) and `/api/stt`
@@ -125,7 +144,7 @@ the scene turns the vision module's gaze point into the watched feed and emits
 ```text
 ShiftScene ── sim:tick ──▶ world ── world:snapshot, world:suspiciousStart/End ──▶ feeds, analytics
     │  gazeController.getPoint() → watched feed ── gaze:sample ──▶ analytics
-    │  click an NPC ── flag:created ──▶ analytics
+    │  report + spoken follow-up ── flag:created, radio:report ──▶ analytics
     └─ shift:start / shift:end ──▶ analytics ── analytics:report ──▶ DebriefScene, debrief panel
 ```
 
