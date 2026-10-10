@@ -199,3 +199,54 @@ export function runBootSequence(root: HTMLElement): Promise<void> {
     void play();
   });
 }
+
+const SHUTDOWN_MS = 1800;
+
+/**
+ * Shuts the machine down: a closing message, then a dark screen with a power
+ * button. Resolves when the player presses the button to turn it back on.
+ */
+export function runShutdown(root: HTMLElement): Promise<void> {
+  return new Promise((resolve) => {
+    const message = h(
+      "p",
+      { class: "power-message", role: "status" },
+      "NIGHTWATCH 98 is shutting down ...",
+    );
+    const button = h(
+      "button",
+      {
+        type: "button",
+        class: "power-btn",
+        "aria-label": "Power on",
+        title: "Power on",
+        hidden: true,
+        onclick: () => {
+          playSfx("click");
+          screen.remove();
+          resolve();
+        },
+      },
+      h("span", { class: "power-glyph", "aria-hidden": "true" }),
+    );
+    const hint = h("p", { class: "power-hint", hidden: true }, "POWER");
+    const screen = h(
+      "section",
+      { class: "boot power-off", "aria-label": "Computer is off" },
+      message,
+      button,
+      hint,
+    );
+    root.append(screen);
+    playSfx("cancel");
+
+    window.setTimeout(
+      () => {
+        message.hidden = true;
+        button.hidden = hint.hidden = false;
+        button.focus();
+      },
+      prefersReducedMotion() ? 0 : SHUTDOWN_MS,
+    );
+  });
+}
