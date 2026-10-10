@@ -7,10 +7,10 @@ import { loadShiftSeconds } from "../game/levels";
 import { attachMouseFallback, gazeController, loadGazeModel } from "../vision";
 import type { AppContext, Screen, ScreenName, ScreenParams } from "./context";
 import { h } from "./dom";
-import { runBootSequence } from "./screens/boot";
+import { runBootSequence, runShutdown } from "./screens/boot";
 import { mountCalibration } from "./screens/calibration";
 import { mountDebrief } from "./screens/debrief";
-import { buildDesktop, mountMainMenu } from "./screens/desktop";
+import { buildDesktop, mountMainMenu, type PowerMode } from "./screens/desktop";
 import { mountWatchStation } from "./screens/watchStation";
 import { levelConfig, nightwatchService } from "./service";
 import { openFloatingWindow } from "./window";
@@ -64,6 +64,7 @@ export function startNightwatchUi(root: HTMLElement): void {
     root,
     (screen) => ctx.go(screen),
     () => void openLastDebrief(),
+    (mode) => void powerCycle(mode),
   );
 
   const ctx: AppContext = {
@@ -94,6 +95,20 @@ export function startNightwatchUi(root: HTMLElement): void {
     },
     setTask: desktop.setTask,
   };
+
+  /** Closes whatever is running, then boots back to the desktop. */
+  async function powerCycle(mode: PowerMode): Promise<void> {
+    if (switching) return;
+    cleanup?.();
+    cleanup = null;
+    ctx.setTask(null);
+    desktop.reset();
+    desktop.layer.replaceChildren();
+    delete root.dataset.screen;
+    if (mode === "shutdown") await runShutdown(root);
+    await runBootSequence(root);
+    ctx.go("desktop");
+  }
 
   async function openLastDebrief(): Promise<void> {
     const result = await service.getLastResult();
