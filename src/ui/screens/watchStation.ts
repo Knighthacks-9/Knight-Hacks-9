@@ -483,7 +483,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
         root,
         rec,
         focusButton,
-        renderer: new FeedRenderer(canvas, feed, s.map),
+        renderer: new FeedRenderer(canvas, feed, s.map, config.level),
       };
       focusButton.addEventListener("click", (event) => {
         event.stopPropagation();

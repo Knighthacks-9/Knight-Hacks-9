@@ -84,7 +84,11 @@ describe("startWorld", () => {
     const starts: WorldEvent[] = [];
     const ends: WorldEvent[] = [];
     bus.on("world:map", (m) => (map = m));
-    bus.on("world:snapshot", (s) => (last = s));
+    let sawSuspicious = false;
+    bus.on("world:snapshot", (s) => {
+      last = s;
+      if (s.npcs.some((n) => n.suspicious)) sawSuspicious = true;
+    });
     bus.on("world:suspiciousStart", (e) => starts.push(e));
     bus.on("world:suspiciousEnd", (e) => ends.push(e));
 
@@ -96,6 +100,7 @@ describe("startWorld", () => {
     world.stop();
 
     expect(last).toBeDefined();
+    expect(sawSuspicious).toBe(true);
     expect(starts.length).toBeGreaterThanOrEqual(4);
     expect(new Set(starts.map((s) => s.behavior)).size).toBe(4);
     expect(ends.map((e) => e.id).sort()).toEqual(
@@ -107,5 +112,21 @@ describe("startWorld", () => {
     }
     // Shift is over and everyone has left.
     expect(last!.npcs).toHaveLength(0);
+  });
+});
+
+describe("short shifts", () => {
+  it("spreads suspicious events across a 30 second shift", () => {
+    const bus = mitt<AppEvents>();
+    const starts: WorldEvent[] = [];
+    bus.on("world:suspiciousStart", (e) => starts.push(e));
+    const world = startWorld({ bus, seed: 3, shiftSeconds: 30 });
+    const dt = 1 / 30;
+    for (let t = dt; t <= 30; t += dt) bus.emit("sim:tick", { dt, t });
+    world.stop();
+
+    expect(starts.length).toBeGreaterThanOrEqual(3);
+    const times = starts.map((s) => s.t);
+    expect(Math.max(...times) - Math.min(...times)).toBeGreaterThan(5);
   });
 });
