@@ -12,35 +12,37 @@
   box-sizing: border-box;
 }
 
+/* The game gets a full-height row so it stays put when the debrief panel
+   appears in the row below it. */
 body {
   display: grid;
+  grid-template-rows: 100vh auto;
+  justify-items: center;
   min-width: 320px;
-  min-height: 100vh;
   margin: 0;
-  place-items: center;
   background: #0b1020;
 }
 
 #app {
+  align-self: center;
   width: min(100vw, 960px);
   aspect-ratio: 16 / 9;
   position: relative;
   z-index: 1;
 }
 
+/* Debrief details, under the game; analytics shows it only on Debrief. */
 #analytics-panel {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  width: min(420px, calc(100vw - 32px));
-  max-height: min(78vh, 760px);
-  overflow: auto;
+  width: min(960px, calc(100vw - 32px));
+  margin: 16px 0 40px;
   padding: 18px 20px;
   border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 16px;
   background: rgba(15, 23, 42, 0.9);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.45);
-  z-index: 2;
+}
+
+#analytics-panel[hidden] {
+  display: none;
 }
 
 .analytics-panel {
@@ -66,7 +68,7 @@ body {
 }
 
 .summary-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .metric,
@@ -163,8 +165,9 @@ body {
   color: #fca5a5;
 }
 
-.stat-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.stat-grid,
+.heat-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }
 
 .stat {
@@ -172,13 +175,60 @@ body {
   gap: 4px;
 }
 
-.heat-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
+/* --heat (0..1) is set per cell from the share of time spent on that feed. */
 .heat-cell {
   display: grid;
   gap: 4px;
+  background: rgba(74, 222, 128, calc(0.08 + 0.5 * var(--heat, 0)));
+}
+
+.timeline {
+  display: grid;
+  gap: 6px;
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.lane-label {
+  color: #cbd5e1;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lane-track {
+  position: relative;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(30, 41, 59, 0.8);
+  overflow: hidden;
+}
+
+.lane-track i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.lane-track .gaze {
+  top: 5px;
+  bottom: 5px;
+  background: #e2e8f0;
+}
+
+.lane-track .event.caught {
+  background: rgba(34, 197, 94, 0.45);
+}
+
+.lane-track .event.missed-looking,
+.lane-track .event.missed-not-looking {
+  background: rgba(251, 146, 60, 0.45);
 }
 
 .heat-value {
@@ -196,128 +246,4 @@ canvas {
   display: block;
   width: 100%;
   height: 100%;
-}
-
-.camera-preview {
-  position: fixed;
-  z-index: 1000;
-  right: 16px;
-  bottom: 16px;
-  width: min(240px, calc(100vw - 32px));
-  aspect-ratio: 4 / 3;
-  overflow: hidden;
-  border: 1px solid #68e0ad;
-  border-radius: 10px;
-  background: #080a0f;
-  box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
-}
-
-.camera-preview__video {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transform: scaleX(-1);
-}
-
-.camera-preview__overlay {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  transform: scaleX(-1);
-  pointer-events: none;
-}
-
-.camera-preview__overlay[hidden] {
-  display: none;
-}
-
-.camera-preview__face-box {
-  fill: rgb(104 224 173 / 8%);
-  stroke: #68e0ad;
-  stroke-width: 4;
-  vector-effect: non-scaling-stroke;
-}
-
-.camera-preview__eye-corner {
-  fill: #68e0ad;
-  stroke: #080a0f;
-  stroke-width: 3;
-  vector-effect: non-scaling-stroke;
-}
-
-.camera-preview__iris {
-  fill: #ff5c75;
-  stroke: #ffffff;
-  stroke-width: 3;
-  vector-effect: non-scaling-stroke;
-}
-
-.camera-preview__debug-toggle {
-  position: absolute;
-  z-index: 1;
-  top: 8px;
-  right: 8px;
-  padding: 6px 8px;
-  border: 1px solid #526071;
-  border-radius: 5px;
-  background: rgb(8 10 15 / 88%);
-  color: #f3f4f6;
-  font:
-    600 11px Arial,
-    sans-serif;
-  cursor: pointer;
-}
-
-.camera-preview__debug-toggle[aria-pressed="true"] {
-  border-color: #68e0ad;
-  color: #9af0c9;
-}
-
-.camera-preview__debug-status {
-  position: absolute;
-  z-index: 1;
-  right: 8px;
-  bottom: 8px;
-  left: 8px;
-  width: fit-content;
-  max-width: calc(100% - 16px);
-  padding: 5px 7px;
-  border-radius: 4px;
-  background: rgb(8 10 15 / 88%);
-  color: #ffcf70;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.camera-preview__debug-status[data-state="detected"] {
-  color: #9af0c9;
-}
-
-.camera-preview__debug-status[data-state="partial"] {
-  color: #ffcf70;
-}
-
-.camera-preview__debug-status[data-state="missing"] {
-  color: #ff9b9b;
-}
-
-.camera-preview__debug-status[hidden] {
-  display: none;
-}
-
-.camera-preview__label {
-  position: absolute;
-  z-index: 1;
-  top: 8px;
-  left: 8px;
-  padding: 5px 7px;
-  border-radius: 4px;
-  background: rgb(8 10 15 / 78%);
-  color: #d5f9e9;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
 }

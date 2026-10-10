@@ -7,7 +7,7 @@ import {
   validationErrorPx,
   type CalibrationSample,
 } from "./gazeModel";
-import type { GazePoint } from "./index";
+import type { GazePoint } from "./gazeController";
 
 const GRID: GazePoint[] = [0.1, 0.5, 0.9].flatMap((y) =>
   [0.08, 0.5, 0.92].map((x) => ({ x, y })),

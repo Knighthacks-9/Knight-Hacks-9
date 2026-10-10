@@ -66,16 +66,59 @@ returns a smoothed canvas point (0..1), `getSource()` reports `tracker`,
 
 ## Team ownership
 
-- **Person 1 — Vision:** `src/vision/` — webcam capture, MediaPipe face/eye
-  tracking, gaze mapping, calibration, tuning, and mouse fallback
-- **Person 2 — World:** `src/world/` — map, NPC, and pathfinding placeholder
-- **Person 3 — Game:** `src/game/` — Phaser scenes and scene-flow placeholder
-- **Person 4 — Analytics:** `src/analytics/` — logging, scoring, and debrief
-  data placeholder
-- **Shared:** `src/shared/` — types and the shared event bus
+| Folder           | Owner    | What lives there                                                          |
+| ---------------- | -------- | ------------------------------------------------------------------------- |
+| `src/vision/`    | Person 1 | Webcam, MediaPipe tracking, gaze model, calibration scene, mouse fallback |
+| `src/world/`     | Person 2 | Map, cameras, A\* pathfinding, NPC routines and suspicious behaviors      |
+| `src/game/`      | Person 3 | Title, Shift, and Debrief scenes, camera feeds, levels                    |
+| `src/analytics/` | Person 4 | Shift logging, catch/miss classification, debrief report and panel        |
+| `src/shared/`    | Everyone | `types.ts` (the contract) and `eventBus.ts`                               |
 
-Modules should communicate through `src/shared/eventBus.ts` and the shared types
-in `src/shared/types.ts`, rather than importing one another's internals.
+`src/main.ts` boots Phaser, registers the scenes, installs analytics, and
+attaches the mouse fallback.
+
+## How the modules fit together
+
+The Shift scene owns the clock. Each frame it emits `sim:tick`; the world
+answers with `world:snapshot`, the feeds draw the NPCs each camera sees, and
+the scene turns the vision module's gaze point into the watched feed and emits
+`gaze:sample`. Analytics listens to everything and answers `shift:end` with
+`analytics:report`, which the Debrief scene and the HTML debrief panel show.
+
+```text
+ShiftScene ── sim:tick ──▶ world ── world:snapshot, world:suspiciousStart/End ──▶ feeds, analytics
+    │  gazeController.getPoint() → watched feed ── gaze:sample ──▶ analytics
+    │  click an NPC ── flag:created ──▶ analytics
+    └─ shift:start / shift:end ──▶ analytics ── analytics:report ──▶ DebriefScene, debrief panel
+```
+
+| Event                           | Payload         | Emitted by | Used by                      |
+| ------------------------------- | --------------- | ---------- | ---------------------------- |
+| `scene:navigate`                | `SceneKey`      | any scene  | `main.ts`, analytics (panel) |
+| `shift:start`                   | `ShiftStart`    | game       | analytics                    |
+| `sim:tick`                      | `SimTick`       | game       | world                        |
+| `world:map`                     | `WorldMap`      | world      | game, analytics              |
+| `world:snapshot`                | `WorldSnapshot` | world      | game, analytics              |
+| `world:suspiciousStart` / `End` | `WorldEvent`    | world      | analytics                    |
+| `gaze:sample`                   | `GazeSample`    | game       | analytics                    |
+| `flag:created`                  | `Flag`          | game       | analytics                    |
+| `shift:end`                     | `ShiftEnd`      | game       | analytics                    |
+| `analytics:report`              | `ShiftReport`   | analytics  | game                         |
+
+Rules:
+
+- Change `src/shared/types.ts` together: it is the only thing every module
+  depends on, and a payload change needs both the sender and the listeners.
+- Import another module only through its `index.ts` (`../vision`,
+  `../world`, `../analytics`), never its internal files. Phaser scenes are the
+  one exception: `main.ts` imports them directly so each `index.ts` stays
+  loadable in tests.
+- Times in payloads are shift seconds from `sim:tick`, so gaze, world events,
+  and flags share one timeline.
+- Work on feature branches and open pull requests.
+
+Dev shortcuts: `/?level=4` starts at level 4, and `/src/world/world-debug.html`
+runs the world on its own with a top-down view.
 
 ## GitHub Pages
 
