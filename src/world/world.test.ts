@@ -1,0 +1,95 @@
+import mitt from "mitt";
+import { describe, expect, it } from "vitest";
+import type {
+  AppEvents,
+  WorldEvent,
+  WorldMap,
+  WorldSnapshot,
+} from "../shared/types";
+import { startWorld } from "./index";
+import { buildMap, EXITS, idx, isWalkable } from "./map";
+import { findPath } from "./pathfinding";
+
+describe("world map", () => {
+  const map = buildMap();
+
+  it("has every camera seeing some floor", () => {
+    expect(map.tiles).toHaveLength(map.width * map.height);
+    for (const cam of map.cameras)
+      expect(cam.visibleTiles.length).toBeGreaterThan(10);
+  });
+
+  it("connects both exits to every room", () => {
+    for (const exit of EXITS) {
+      for (const r of map.rooms) {
+        expect(findPath(map, exit, { x: r.x + 1, y: r.y + 1 })).not.toBeNull();
+      }
+    }
+  });
+});
+
+describe("A* pathfinding", () => {
+  const map = buildMap();
+
+  it("returns a contiguous walkable path", () => {
+    const path = findPath(map, EXITS[0], { x: 33, y: 5 })!;
+    expect(path[0]).toEqual(EXITS[0]);
+    expect(path.at(-1)).toEqual({ x: 33, y: 5 });
+    for (let i = 1; i < path.length; i++) {
+      const d =
+        Math.abs(path[i].x - path[i - 1].x) +
+        Math.abs(path[i].y - path[i - 1].y);
+      expect(d).toBe(1);
+      expect(isWalkable(map, path[i].x, path[i].y)).toBe(true);
+    }
+  });
+
+  it("returns null for a wall goal", () => {
+    expect(findPath(map, EXITS[0], { x: 0, y: 0 })).toBeNull();
+  });
+
+  it("sees fewer camera tiles when avoiding cameras", () => {
+    const seen = new Set(map.cameras.flatMap((c) => c.visibleTiles));
+    const cost = (i: number) => (seen.has(i) ? 25 : 0);
+    const count = (p: { x: number; y: number }[]) =>
+      p.filter((v) => seen.has(idx(map, v.x, v.y))).length;
+    const goal = { x: 3, y: 3 };
+    const plain = findPath(map, EXITS[1], goal)!;
+    const sneaky = findPath(map, EXITS[1], goal, cost)!;
+    expect(count(sneaky)).toBeLessThanOrEqual(count(plain));
+  });
+});
+
+describe("startWorld", () => {
+  it("emits the map, snapshots, and paired suspicious events over a shift", () => {
+    const bus = mitt<AppEvents>();
+    let map: WorldMap | undefined;
+    let last: WorldSnapshot | undefined;
+    const starts: WorldEvent[] = [];
+    const ends: WorldEvent[] = [];
+    bus.on("world:map", (m) => (map = m));
+    bus.on("world:snapshot", (s) => (last = s));
+    bus.on("world:suspiciousStart", (e) => starts.push(e));
+    bus.on("world:suspiciousEnd", (e) => ends.push(e));
+
+    const world = startWorld({ bus, seed: 42, shiftSeconds: 240 });
+    expect(map).toBeDefined();
+
+    const dt = 1 / 30;
+    for (let t = dt; t <= 400; t += dt) bus.emit("sim:tick", { dt, t });
+    world.stop();
+
+    expect(last).toBeDefined();
+    expect(starts.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(starts.map((s) => s.behavior)).size).toBe(4);
+    expect(ends.map((e) => e.id).sort()).toEqual(
+      starts.map((s) => s.id).sort(),
+    );
+    for (const s of starts) {
+      const e = ends.find((x) => x.id === s.id)!;
+      expect(e.t).toBeGreaterThan(s.t);
+    }
+    // Shift is over and everyone has left.
+    expect(last!.npcs).toHaveLength(0);
+  });
+});

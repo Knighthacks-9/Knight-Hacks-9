@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>World debug</title>
+    <style>
+      body {
+        background: #111;
+        color: #ddd;
+        font: 13px monospace;
+        margin: 16px;
+      }
+      button {
+        margin: 0 4px 8px 0;
+      }
+      #log {
+        white-space: pre;
+        height: 160px;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      Spawn:
+      <button data-b="loitering">loitering</button>
+      <button data-b="revisitingDoors">revisitingDoors</button>
+      <button data-b="restrictedZone">restrictedZone</button>
+      <button data-b="avoidingCameras">avoidingCameras</button>
+      <label><input type="checkbox" id="cams" checked /> camera views</label>
+      <label
+        >speed <input type="range" id="speed" min="1" max="10" value="1"
+      /></label>
+      <span id="time"></span>
+    </div>
+    <canvas id="c"></canvas>
+    <div id="log"></div>
+    <script type="module" src="./debug.ts"></script>
+  </body>
+</html>
