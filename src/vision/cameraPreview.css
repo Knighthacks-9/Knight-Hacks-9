@@ -1,0 +1,264 @@
+/* Webcam preview: a small retro camera window in the NIGHTWATCH style.
+   It mounts on <body>, outside the desktop UI, so it carries its own tokens
+   (falling back to the desktop's when they exist). */
+
+.cam-preview,
+.cam-preview-show {
+  --cam-chrome: var(--chrome, #bcc3b9);
+  --cam-hi: var(--hi, #f1f4ee);
+  --cam-lo: var(--lo, #6b736b);
+  --cam-shadow: var(--shadow, #1d221f);
+  --cam-pixel: var(--font-pixel, "Press Start 2P", "Courier New", monospace);
+  --cam-term: var(--font-term, "VT323", "Lucida Console", monospace);
+  --cam-ok: var(--green-text, #7fe0a0);
+  --cam-warn: var(--amber-text, #f2c14e);
+  --cam-error: #ff9b9b;
+}
+
+.cam-preview,
+.cam-preview *,
+.cam-preview-show {
+  box-sizing: border-box;
+}
+
+.cam-preview {
+  position: fixed;
+  right: 16px;
+  bottom: 52px;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  width: min(320px, 30vw);
+  min-width: 220px;
+  padding: 2px;
+  background: var(--cam-chrome);
+  border: 2px solid;
+  border-color: var(--cam-hi) var(--cam-shadow) var(--cam-shadow) var(--cam-hi);
+  box-shadow:
+    inset -1px -1px 0 var(--cam-lo),
+    inset 1px 1px 0 #fff,
+    3px 3px 0 rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: opacity 0.12s steps(2);
+}
+
+.cam-preview.is-dragging {
+  cursor: grabbing;
+  opacity: 0.94;
+}
+
+/* --- Title bar ------------------------------------------------------------ */
+
+.cam-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 2px 0 6px;
+  background: linear-gradient(
+    90deg,
+    var(--title-a, #1f3a73),
+    var(--title-b, #5577aa)
+  );
+  color: #fff;
+}
+
+.cam-preview-rec {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: #e5484d;
+  animation: cam-rec-blink 1.2s steps(1) infinite;
+}
+
+@keyframes cam-rec-blink {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.cam-preview-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--cam-pixel);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cam-preview-btn {
+  flex: none;
+  width: 18px;
+  height: 16px;
+  padding: 0 0 2px;
+  background: var(--cam-chrome);
+  color: #000;
+  font: 12px/1 var(--cam-term);
+  border: 2px solid;
+  border-color: var(--cam-hi) var(--cam-shadow) var(--cam-shadow) var(--cam-hi);
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.cam-preview-btn:active {
+  border-color: var(--cam-shadow) var(--cam-hi) var(--cam-hi) var(--cam-shadow);
+}
+
+.cam-preview-btn:focus-visible,
+.cam-preview-show:focus-visible {
+  outline: 2px dashed var(--cam-warn);
+  outline-offset: 2px;
+}
+
+/* --- Feed ---------------------------------------------------------------- */
+
+.cam-preview-screen {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  margin-top: 2px;
+  overflow: hidden;
+  background: #0a0d12;
+  border: 2px solid;
+  border-color: var(--cam-shadow) #4a524c #4a524c var(--cam-shadow);
+}
+
+.cam-preview-screen video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  filter: contrast(1.06) saturate(0.8);
+}
+
+/* CRT scanlines and a soft vignette over the feed. */
+.cam-preview-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.22) 0 1px,
+      transparent 1px 3px
+    ),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.45));
+}
+
+.cam-preview-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  transform: scaleX(-1);
+}
+
+.cam-guide {
+  fill: rgba(242, 193, 78, 0.06);
+  stroke: var(--cam-warn);
+  stroke-width: 5;
+  stroke-dasharray: 18 12;
+  vector-effect: non-scaling-stroke;
+}
+
+.cam-guide-eyes {
+  stroke: var(--cam-warn);
+  stroke-width: 2;
+  stroke-dasharray: 6 8;
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+.cam-preview[data-aligned="true"] .cam-guide {
+  fill: rgba(127, 224, 160, 0.08);
+  stroke: var(--cam-ok);
+  stroke-dasharray: none;
+}
+
+.cam-preview[data-aligned="true"] .cam-guide-eyes {
+  stroke: var(--cam-ok);
+}
+
+.cam-face-box {
+  fill: none;
+  stroke: rgba(230, 233, 227, 0.45);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.cam-eye-corner {
+  fill: var(--lcd, #9fb394);
+}
+
+.cam-iris {
+  fill: var(--cam-warn);
+  stroke: #10131b;
+  stroke-width: 2;
+}
+
+/* --- Status line ---------------------------------------------------------- */
+
+.cam-preview-status {
+  margin-top: 2px;
+  min-height: 24px;
+  padding: 3px 8px;
+  background: #11151c;
+  border: 2px solid;
+  border-color: var(--cam-shadow) #4a524c #4a524c var(--cam-shadow);
+  color: #9aa3a0;
+  font: 17px/1.05 var(--cam-term);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.cam-preview-status[data-tone="ok"] {
+  color: var(--cam-ok);
+}
+
+.cam-preview-status[data-tone="warn"] {
+  color: var(--cam-warn);
+}
+
+.cam-preview-status[data-tone="error"] {
+  color: var(--cam-error);
+  text-transform: none;
+}
+
+/* --- "Show camera" stand-in ------------------------------------------------ */
+
+.cam-preview-show {
+  position: fixed;
+  right: 16px;
+  bottom: 52px;
+  z-index: 99999;
+  padding: 7px 12px;
+  background: var(--cam-chrome);
+  color: #111;
+  font-family: var(--cam-pixel);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  border: 2px solid;
+  border-color: var(--cam-hi) var(--cam-shadow) var(--cam-shadow) var(--cam-hi);
+  border-radius: 0;
+  box-shadow:
+    inset -1px -1px 0 var(--cam-lo),
+    inset 1px 1px 0 #fff,
+    3px 3px 0 rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.cam-preview-show:active {
+  border-color: var(--cam-shadow) var(--cam-hi) var(--cam-hi) var(--cam-shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cam-preview-rec {
+    animation: none;
+  }
+}

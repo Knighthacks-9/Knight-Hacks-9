@@ -20,6 +20,8 @@ export interface GazeFeatures {
   faceY: number;
   /** Distance between the eyes as a fraction of frame width; grows when leaning in. */
   faceScale: number;
+  /** Frame height divided by width; converts faceY into the same units as faceX. */
+  frameAspect?: number;
   blink: boolean;
   /** performance.now() time of the camera frame. */
   timestamp: number;
@@ -207,6 +209,7 @@ export function extractGazeFeatures(
     faceX: (first.x + second.x) / 2 / frameWidth,
     faceY: (first.y + second.y) / 2 / frameHeight,
     faceScale: Math.hypot(second.x - first.x, second.y - first.y) / frameWidth,
+    frameAspect: frameHeight / frameWidth,
     blink: false,
     timestamp,
   };

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import {
   DEFAULT_GAZE_SETTINGS,
+  checkHeadAlignment,
   fitGazeModel,
   gazeController,
   loadGazeModel,
@@ -700,6 +701,17 @@ export class CalibrationScene extends Phaser.Scene {
       this.setMode("setup");
       this.setStatusPill(
         "Enable the webcam and wait until it tracks both eyes, then calibrate.",
+        "error",
+      );
+      return;
+    }
+    // Only framing matters here: recalibrating may start from a new spot.
+    const alignment = checkHeadAlignment(gazeController.getTrackerFeatures());
+    if (!alignment.aligned) {
+      playSfx("error");
+      this.setMode("setup");
+      this.setStatusPill(
+        `Get your face well in view of the camera: ${alignment.hint.toLowerCase()}.`,
         "error",
       );
       return;

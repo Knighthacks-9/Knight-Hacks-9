@@ -1,25 +1,54 @@
 import type { GazeFeatures } from "./gazeFeatures";
 import type { GazePoint } from "./gazeController";
 
-export const GAZE_FEATURE_KEYS = [
-  "eyeX",
-  "eyeY",
-  "openness",
-  "yaw",
-  "pitch",
-  "faceX",
-  "faceY",
-] as const satisfies readonly (keyof GazeFeatures)[];
+/*
+ * Gaze geometry. The webcam sits at the screen, roughly in its plane. The
+ * player's line of sight starts at their head and points along the head's
+ * direction plus the eyes' turn within the head. Where it meets the screen
+ * plane is, per axis and in units of the calibration distance:
+ *
+ *   P = headOffset + depth * tan(headAngle + eyeGain * irisOffset)
+ *
+ * and screen position is close to linear in P. Head offset and depth come
+ * from where the face sits in the frame and how big it is, so moving, turning
+ * or leaning is accounted for by construction rather than learned from scratch.
+ *
+ * Only the eye gain (how far the eye turns per unit of iris offset) differs
+ * much between players. It is chosen by how well each candidate predicts
+ * calibration points the fit has not seen, which works best when calibration
+ * includes some head movement; with none, a typical value wins.
+ */
 
-// Smallest spread assumed for each feature. A feature that barely moved during
-// calibration would otherwise be amplified wildly when it changes later.
-const FEATURE_SCALE_FLOOR = [0.01, 0.005, 0.02, 0.02, 0.02, 0.01, 0.01];
+/** 2 * tan(horizontal field of view / 2) for a typical ~60° webcam. */
+const FOV_FACTOR = 1.15;
+const DEFAULT_ASPECT = 9 / 16;
+const MAX_ANGLE = 1.2;
+const DEPTH_LIMITS = [0.4, 2.5] as const;
+const EYE_GAINS = [1.5, 2, 2.5, 3, 3.5, 4, 5, 6];
+const PRIOR_EYE_GAIN = 3.5;
+/** Relative error added per unit of |log(gain / prior)|, to break near-ties. */
+const EYE_GAIN_PRIOR_WEIGHT = 0.15;
+
+// Each axis is a ridge regression on the geometric estimate plus raw eye
+// terms that soak up what the geometry misses (uneven eyes, eyelid cues).
+// The geometric term is barely penalized, so when they agree (as they do in
+// a still-head calibration) the fit credits the geometry, which keeps working
+// when the head moves.
+export const DESIGN_KEYS = ["geometry", "eyeX", "eyeY", "openness"] as const;
+const GEOMETRY_PENALTY = 1e-4;
+const RIDGE_ALPHAS = [0.03, 0.1, 0.3, 1];
+// Smallest spread assumed for each design term, so a term that barely moved
+// during calibration is not amplified wildly later.
+const FEATURE_SCALE_FLOOR = [0.01, 0.01, 0.005, 0.02];
 const MAX_STANDARD_SCORE = 5;
-const RIDGE_ALPHAS = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1];
 // eyeX, eyeY, openness: the features most disturbed by saccades and half-blinks.
-const OUTLIER_FEATURES = [0, 1, 2];
 const OUTLIER_LIMIT = 3;
-const STORAGE_KEY = "night-watch:gaze-model:v2";
+const STORAGE_KEY = "night-watch:gaze-model:v3";
+// Click corrections: only the most recent count, since the head drifts over
+// a session. The prior keeps a few clustered clicks to a plain shift.
+const MAX_CORRECTION_POINTS = 12;
+const CORRECTION_PRIOR = 0.02;
+const CORRECTION_SCALE_LIMITS = [0.5, 2] as const;
 
 export const MIN_CALIBRATION_POINTS = 4;
 
@@ -34,35 +63,51 @@ export interface GazeValidationPoint {
   predicted: GazePoint;
 }
 
-export interface GazeModel {
-  features: string[];
+/** One screen axis: a ridge fit over DESIGN_KEYS. */
+export interface GazeAxisModel {
+  /** Radians of eye turn per eye-width of iris offset. */
+  eyeGain: number;
+  alpha: number;
   mean: number[];
   scale: number[];
-  /** Bias followed by one weight per feature. */
-  weightsX: number[];
-  weightsY: number[];
-  alpha: number;
-  validation: GazeValidationPoint[];
+  /** Bias followed by one weight per design term. */
+  weights: number[];
 }
+
+export interface GazeModel {
+  version: 3;
+  /** Yaw-corrected face scale at the calibration distance (depth 1). */
+  refScale: number;
+  x: GazeAxisModel;
+  y: GazeAxisModel;
+  validation: GazeValidationPoint[];
+  /** Fine-tuning from the player's clicks, applied after the fitted model. */
+  correction?: GazeCorrection;
+}
+
+export interface GazeCorrection {
+  /** Each click: where the model put the gaze, and where the player looked. */
+  points: GazeValidationPoint[];
+  /** Per axis: corrected = scale * predicted + offset. */
+  x: { scale: number; offset: number };
+  y: { scale: number; offset: number };
+}
+
+type Axis = "x" | "y";
 
 interface RidgeFit {
   mean: number[];
   scale: number[];
-  weightsX: number[];
-  weightsY: number[];
+  weights: number[];
 }
 
 interface PointGroup {
   target: GazePoint;
-  rows: number[][];
+  frames: GazeFeatures[];
 }
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
-
-export function featureVector(features: GazeFeatures): number[] {
-  return GAZE_FEATURE_KEYS.map((key) => features[key]);
-}
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -70,6 +115,60 @@ function median(values: number[]): number {
   return sorted.length % 2
     ? sorted[middle]
     : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/** Eye distance in the frame, undoing the narrowing from a turned head. */
+function frontalScale(features: GazeFeatures): number {
+  return features.faceScale / Math.max(Math.cos(features.yaw), 0.5);
+}
+
+/** Distance from the camera relative to calibration (1 = same distance). */
+function depthOf(features: GazeFeatures, refScale: number): number {
+  return clamp(
+    refScale / Math.max(frontalScale(features), 1e-4),
+    ...DEPTH_LIMITS,
+  );
+}
+
+/**
+ * Where the line of sight meets the screen plane along one axis, in units of
+ * the calibration distance and image directions (x right, y down).
+ */
+export function gazeGeometry(
+  features: GazeFeatures,
+  axis: Axis,
+  eyeGain: number,
+  refScale: number,
+): number {
+  const depth = depthOf(features, refScale);
+  const angle = clamp(
+    axis === "x"
+      ? features.yaw + eyeGain * features.eyeX
+      : features.pitch + eyeGain * features.eyeY,
+    -MAX_ANGLE,
+    MAX_ANGLE,
+  );
+  const offset =
+    axis === "x"
+      ? (features.faceX - 0.5) * FOV_FACTOR
+      : (features.faceY - 0.5) *
+        FOV_FACTOR *
+        (features.frameAspect ?? DEFAULT_ASPECT);
+  return depth * (offset + Math.tan(angle));
+}
+
+function designRow(
+  features: GazeFeatures,
+  axis: Axis,
+  eyeGain: number,
+  refScale: number,
+): number[] {
+  return [
+    gazeGeometry(features, axis, eyeGain, refScale),
+    features.eyeX,
+    features.eyeY,
+    features.openness,
+  ];
 }
 
 function solveLinearSystem(
@@ -107,11 +206,11 @@ function solveLinearSystem(
 
 function fitRidge(
   rows: number[][],
-  targets: GazePoint[],
+  targets: number[],
   alpha: number,
 ): RidgeFit | null {
   const count = rows.length;
-  const featureCount = GAZE_FEATURE_KEYS.length;
+  const featureCount = DESIGN_KEYS.length;
   if (count === 0) return null;
 
   const mean = Array.from(
@@ -128,138 +227,210 @@ function fitRidge(
   const normal = Array.from({ length: size }, () =>
     new Array<number>(size).fill(0),
   );
-  const sumX = new Array<number>(size).fill(0);
-  const sumY = new Array<number>(size).fill(0);
-
+  const sums = new Array<number>(size).fill(0);
   rows.forEach((row, index) => {
     const z = [1, ...row.map((value, j) => (value - mean[j]) / scale[j])];
     for (let r = 0; r < size; r += 1) {
       for (let c = 0; c < size; c += 1) normal[r][c] += z[r] * z[c];
-      sumX[r] += z[r] * targets[index].x;
-      sumY[r] += z[r] * targets[index].y;
+      sums[r] += z[r] * targets[index];
     }
   });
-  // Penalize feature weights but not the bias.
-  for (let j = 1; j < size; j += 1) normal[j][j] += alpha * count;
+  // Penalize the raw eye terms, barely the geometry, and never the bias.
+  normal[1][1] += GEOMETRY_PENALTY * count;
+  for (let j = 2; j < size; j += 1) normal[j][j] += alpha * count;
 
-  const weightsX = solveLinearSystem(normal, sumX);
-  const weightsY = solveLinearSystem(normal, sumY);
-  return weightsX && weightsY ? { mean, scale, weightsX, weightsY } : null;
+  const weights = solveLinearSystem(normal, sums);
+  return weights ? { mean, scale, weights } : null;
 }
 
-function predictVector(fit: RidgeFit, vector: number[]): GazePoint {
-  let x = fit.weightsX[0];
-  let y = fit.weightsY[0];
-  vector.forEach((value, j) => {
+function predictRow(fit: RidgeFit, row: number[]): number {
+  let value = fit.weights[0];
+  row.forEach((entry, j) => {
     const z = clamp(
-      (value - fit.mean[j]) / fit.scale[j],
+      (entry - fit.mean[j]) / fit.scale[j],
       -MAX_STANDARD_SCORE,
       MAX_STANDARD_SCORE,
     );
-    x += fit.weightsX[j + 1] * z;
-    y += fit.weightsY[j + 1] * z;
+    value += fit.weights[j + 1] * z;
   });
-  return { x, y };
+  return value;
 }
 
 /** Drops frames whose eye measurements sit far from the rest of that point's frames. */
-function rejectOutliers(rows: number[][]): number[][] {
-  const limits = OUTLIER_FEATURES.map((j) => {
-    const values = rows.map((row) => row[j]);
+function rejectOutliers(frames: GazeFeatures[]): GazeFeatures[] {
+  const checks = (["eyeX", "eyeY", "openness"] as const).map((key, j) => {
+    const values = frames.map((f) => f[key]);
     const center = median(values);
     const spread = median(values.map((value) => Math.abs(value - center)));
+    const floor = FEATURE_SCALE_FLOOR[j + 1];
     return {
+      key,
       center,
-      limit: OUTLIER_LIMIT * Math.max(1.4826 * spread, FEATURE_SCALE_FLOOR[j]),
+      limit: OUTLIER_LIMIT * Math.max(1.4826 * spread, floor),
     };
   });
-  const kept = rows.filter((row) =>
-    OUTLIER_FEATURES.every(
-      (j, index) =>
-        Math.abs(row[j] - limits[index].center) <= limits[index].limit,
+  const kept = frames.filter((f) =>
+    checks.every(
+      ({ key, center, limit }) => Math.abs(f[key] - center) <= limit,
     ),
   );
-  return kept.length >= 3 ? kept : rows;
+  return kept.length >= 3 ? kept : frames;
 }
 
 function groupSamples(samples: CalibrationSample[]): PointGroup[] {
   const groups = new Map<string, PointGroup>();
   for (const { features, target } of samples) {
-    const row = featureVector(features);
     if (
       features.blink ||
-      !row.every(Number.isFinite) ||
+      ![
+        features.eyeX,
+        features.eyeY,
+        features.openness,
+        features.yaw,
+        features.pitch,
+        features.faceX,
+        features.faceY,
+        features.faceScale,
+      ].every(Number.isFinite) ||
+      !(features.faceScale > 0) ||
       !Number.isFinite(target.x) ||
       !Number.isFinite(target.y)
     ) {
       continue;
     }
     const key = `${target.x.toFixed(4)},${target.y.toFixed(4)}`;
-    const group = groups.get(key) ?? { target: { ...target }, rows: [] };
-    group.rows.push(row);
+    const group = groups.get(key) ?? { target: { ...target }, frames: [] };
+    group.frames.push(features);
     groups.set(key, group);
   }
   return [...groups.values()].map((group) => ({
     target: group.target,
-    rows: rejectOutliers(group.rows),
+    frames: rejectOutliers(group.frames),
   }));
 }
 
-function flatten(groups: PointGroup[]): {
-  rows: number[][];
-  targets: GazePoint[];
-} {
+interface AxisChoice {
+  model: GazeAxisModel;
+  /** Held-out mean prediction for each group, in group order. */
+  heldOut: number[];
+}
+
+/**
+ * Picks the eye gain and ridge strength for one axis by leaving out one
+ * calibration point at a time, then fits on everything. Errors are averaged
+ * over each held-out point's frames, so a head-sweep point whose frames the
+ * fit cannot follow counts against that gain.
+ */
+function fitAxis(
+  groups: PointGroup[],
+  axis: Axis,
+  refScale: number,
+): AxisChoice | null {
+  let best: {
+    eyeGain: number;
+    alpha: number;
+    score: number;
+    heldOut: number[];
+  } | null = null;
+
+  for (const eyeGain of EYE_GAINS) {
+    const rowsByGroup = groups.map((group) =>
+      group.frames.map((f) => designRow(f, axis, eyeGain, refScale)),
+    );
+    const prior =
+      1 + EYE_GAIN_PRIOR_WEIGHT * Math.abs(Math.log(eyeGain / PRIOR_EYE_GAIN));
+    for (const alpha of RIDGE_ALPHAS) {
+      const heldOut: number[] = [];
+      let error = 0;
+      for (let held = 0; held < groups.length; held += 1) {
+        const rows: number[][] = [];
+        const targets: number[] = [];
+        groups.forEach((group, g) => {
+          if (g === held) return;
+          for (const row of rowsByGroup[g]) {
+            rows.push(row);
+            targets.push(group.target[axis]);
+          }
+        });
+        const fit = fitRidge(rows, targets, alpha);
+        if (!fit) break;
+        const goal = groups[held].target[axis];
+        const predictions = rowsByGroup[held].map((row) =>
+          predictRow(fit, row),
+        );
+        heldOut.push(
+          predictions.reduce((sum, p) => sum + p, 0) / predictions.length,
+        );
+        error +=
+          predictions.reduce((sum, p) => sum + (p - goal) ** 2, 0) /
+          predictions.length;
+      }
+      if (heldOut.length !== groups.length) continue;
+      const score = (error / groups.length) * prior;
+      if (!best || score < best.score) {
+        best = { eyeGain, alpha, score, heldOut };
+      }
+    }
+  }
+  if (!best) return null;
+
+  const rows: number[][] = [];
+  const targets: number[] = [];
+  for (const group of groups) {
+    for (const f of group.frames) {
+      rows.push(designRow(f, axis, best.eyeGain, refScale));
+      targets.push(group.target[axis]);
+    }
+  }
+  const fit = fitRidge(rows, targets, best.alpha);
+  if (!fit) return null;
   return {
-    rows: groups.flatMap((group) => group.rows),
-    targets: groups.flatMap((group) => group.rows.map(() => group.target)),
+    model: { eyeGain: best.eyeGain, alpha: best.alpha, ...fit },
+    heldOut: best.heldOut,
   };
 }
 
 /**
- * Fits a ridge regression from gaze features to screen position. The ridge
- * strength is chosen by leaving out one calibration point at a time, which also
- * yields an honest estimate of accuracy at points the model has not seen.
+ * Fits the gaze model from calibration frames. Each held-out point's
+ * prediction is kept as an honest estimate of accuracy at unseen points.
  */
 export function fitGazeModel(samples: CalibrationSample[]): GazeModel | null {
   const groups = groupSamples(samples);
   if (groups.length < MIN_CALIBRATION_POINTS) return null;
 
-  let best: {
-    alpha: number;
-    error: number;
-    validation: GazeValidationPoint[];
-  } | null = null;
-
-  for (const alpha of RIDGE_ALPHAS) {
-    const validation: GazeValidationPoint[] = [];
-    let error = 0;
-    for (const held of groups) {
-      const training = flatten(groups.filter((group) => group !== held));
-      const fit = fitRidge(training.rows, training.targets, alpha);
-      if (!fit) break;
-      const predictions = held.rows.map((row) => predictVector(fit, row));
-      const predicted = {
-        x: predictions.reduce((sum, p) => sum + p.x, 0) / predictions.length,
-        y: predictions.reduce((sum, p) => sum + p.y, 0) / predictions.length,
-      };
-      validation.push({ target: held.target, predicted });
-      error +=
-        (predicted.x - held.target.x) ** 2 + (predicted.y - held.target.y) ** 2;
-    }
-    if (validation.length === groups.length && (!best || error < best.error)) {
-      best = { alpha, error, validation };
-    }
-  }
-  if (!best) return null;
-
-  const all = flatten(groups);
-  const fit = fitRidge(all.rows, all.targets, best.alpha);
-  if (!fit) return null;
+  const refScale = median(
+    groups.flatMap((group) => group.frames.map(frontalScale)),
+  );
+  if (!(refScale > 0)) return null;
+  const x = fitAxis(groups, "x", refScale);
+  const y = fitAxis(groups, "y", refScale);
+  if (!x || !y) return null;
   return {
-    features: [...GAZE_FEATURE_KEYS],
-    ...fit,
-    alpha: best.alpha,
-    validation: best.validation,
+    version: 3,
+    refScale,
+    x: x.model,
+    y: y.model,
+    validation: groups.map((group, i) => ({
+      target: group.target,
+      predicted: { x: x.heldOut[i], y: y.heldOut[i] },
+    })),
+  };
+}
+
+/** The fitted model's estimate, before any click corrections. */
+export function predictUncorrectedGaze(
+  model: GazeModel,
+  features: GazeFeatures,
+): GazePoint {
+  return {
+    x: predictRow(
+      model.x,
+      designRow(features, "x", model.x.eyeGain, model.refScale),
+    ),
+    y: predictRow(
+      model.y,
+      designRow(features, "y", model.y.eyeGain, model.refScale),
+    ),
   };
 }
 
@@ -268,7 +439,72 @@ export function predictGaze(
   model: GazeModel,
   features: GazeFeatures,
 ): GazePoint {
-  return predictVector(model, featureVector(features));
+  const point = predictUncorrectedGaze(model, features);
+  const correction = model.correction;
+  if (!correction) return point;
+  return {
+    x: correction.x.scale * point.x + correction.x.offset,
+    y: correction.y.scale * point.y + correction.y.offset,
+  };
+}
+
+/**
+ * Fits corrected = scale * predicted + offset for one axis, pulling the scale
+ * toward 1. One click gives a pure shift; clicks spread across the screen
+ * can also stretch or shrink the range.
+ */
+function fitCorrectionAxis(
+  predicted: number[],
+  actual: number[],
+): { scale: number; offset: number } {
+  const n = predicted.length;
+  const meanP = predicted.reduce((a, b) => a + b, 0) / n;
+  const meanT = actual.reduce((a, b) => a + b, 0) / n;
+  let spread = 0;
+  let covariance = 0;
+  predicted.forEach((p, i) => {
+    spread += (p - meanP) ** 2;
+    covariance += (p - meanP) * (actual[i] - meanT);
+  });
+  const scale = clamp(
+    (covariance + CORRECTION_PRIOR) / (spread + CORRECTION_PRIOR),
+    ...CORRECTION_SCALE_LIMITS,
+  );
+  return { scale, offset: meanT - scale * meanP };
+}
+
+/**
+ * Adds one click correction: the player looked at `target` while the model
+ * (before corrections) estimated `predicted`. Returns the updated model.
+ */
+export function refineGazeModel(
+  model: GazeModel,
+  point: GazeValidationPoint,
+): GazeModel {
+  const points = [...(model.correction?.points ?? []), point].slice(
+    -MAX_CORRECTION_POINTS,
+  );
+  return {
+    ...model,
+    correction: {
+      points,
+      x: fitCorrectionAxis(
+        points.map((p) => p.predicted.x),
+        points.map((p) => p.target.x),
+      ),
+      y: fitCorrectionAxis(
+        points.map((p) => p.predicted.y),
+        points.map((p) => p.target.y),
+      ),
+    },
+  };
+}
+
+/** The model without any click corrections. */
+export function clearGazeCorrection(model: GazeModel): GazeModel {
+  const rest = { ...model };
+  delete rest.correction;
+  return rest;
 }
 
 /** Mean held-out calibration error in pixels for a canvas of the given size. */
@@ -304,19 +540,30 @@ function isPoint(value: unknown): value is GazePoint {
   return Number.isFinite(point.x) && Number.isFinite(point.y);
 }
 
+function isAxisModel(value: unknown): value is GazeAxisModel {
+  if (!value || typeof value !== "object") return false;
+  const axis = value as Partial<GazeAxisModel>;
+  const count = DESIGN_KEYS.length;
+  return (
+    Number.isFinite(axis.eyeGain) &&
+    axis.eyeGain! > 0 &&
+    Number.isFinite(axis.alpha) &&
+    isNumberArray(axis.mean, count) &&
+    isNumberArray(axis.scale, count) &&
+    axis.scale.every((entry) => entry > 0) &&
+    isNumberArray(axis.weights, count + 1)
+  );
+}
+
 export function parseGazeModel(value: unknown): GazeModel | null {
   if (!value || typeof value !== "object") return null;
   const model = value as Partial<GazeModel>;
-  const featureCount = GAZE_FEATURE_KEYS.length;
   if (
-    !Array.isArray(model.features) ||
-    model.features.join() !== GAZE_FEATURE_KEYS.join() ||
-    !isNumberArray(model.mean, featureCount) ||
-    !isNumberArray(model.scale, featureCount) ||
-    !model.scale.every((entry) => entry > 0) ||
-    !isNumberArray(model.weightsX, featureCount + 1) ||
-    !isNumberArray(model.weightsY, featureCount + 1) ||
-    typeof model.alpha !== "number" ||
+    model.version !== 3 ||
+    !Number.isFinite(model.refScale) ||
+    !(model.refScale! > 0) ||
+    !isAxisModel(model.x) ||
+    !isAxisModel(model.y) ||
     !Array.isArray(model.validation) ||
     !model.validation.every(
       (point) => isPoint(point?.target) && isPoint(point?.predicted),
@@ -324,7 +571,28 @@ export function parseGazeModel(value: unknown): GazeModel | null {
   ) {
     return null;
   }
-  return model as GazeModel;
+  // Corrections are an optional extra: drop them if malformed rather than
+  // losing the whole calibration.
+  const { correction, ...core } = model as GazeModel;
+  return isCorrection(correction) ? { ...core, correction } : core;
+}
+
+function isCorrection(value: unknown): value is GazeCorrection {
+  if (!value || typeof value !== "object") return false;
+  const correction = value as Partial<GazeCorrection>;
+  const isAxis = (axis: unknown) =>
+    !!axis &&
+    typeof axis === "object" &&
+    Number.isFinite((axis as GazeCorrection["x"]).scale) &&
+    Number.isFinite((axis as GazeCorrection["x"]).offset);
+  return (
+    Array.isArray(correction.points) &&
+    correction.points.every(
+      (point) => isPoint(point?.target) && isPoint(point?.predicted),
+    ) &&
+    isAxis(correction.x) &&
+    isAxis(correction.y)
+  );
 }
 
 export function loadGazeModel(): GazeModel | null {
