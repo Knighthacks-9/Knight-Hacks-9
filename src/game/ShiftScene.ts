@@ -7,6 +7,7 @@ import { startWorld, type WorldHandle } from "../world";
 import { CameraFeed } from "./CameraFeed";
 import { ControlPanel } from "./ControlPanel";
 import { MinimapOverlay } from "./MinimapOverlay";
+import { createNpcAnims, preloadNpcSprites } from "./npcSprites";
 import {
   FEED_LIMIT_KEY,
   LEVEL_KEY,
@@ -50,7 +51,12 @@ export class ShiftScene extends Phaser.Scene {
     super("Shift");
   }
 
+  preload(): void {
+    preloadNpcSprites(this);
+  }
+
   create(): void {
+    createNpcAnims(this);
     this.feeds = [];
     this.snapshot = null;
     this.t = 0;
