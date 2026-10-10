@@ -8,7 +8,12 @@ import type {
   WorldSnapshot,
 } from "../shared/types";
 import { startWorld } from "../world";
-import { buildDebriefMarkup, createShiftAnalytics, installAnalytics } from ".";
+import {
+  attentionSpans,
+  buildDebriefMarkup,
+  createShiftAnalytics,
+  installAnalytics,
+} from ".";
 
 const event = (
   id: string,
@@ -127,6 +132,90 @@ describe("shift analytics", () => {
     expect(report.events[0].outcome).toBe("caught");
     expect(report.passed).toBe(true);
     expect(buildDebriefMarkup(report)).toContain("Caught");
+  });
+
+  it("scores 0 when the shift is ended early", () => {
+    const analytics = createShiftAnalytics();
+    analytics.startShift({ level: 1, shiftSeconds: 60, cameraIds: ["cam1"] });
+
+    const report = analytics.endShift({ t: 1, completed: false });
+    expect(report.score).toBe(0);
+    expect(report.passed).toBe(false);
+  });
+});
+
+describe("attention spans", () => {
+  it("merges across brief glances and splits on real switches", () => {
+    const spans = attentionSpans([
+      { cameraId: "cam1", start: 0, end: 4 },
+      { cameraId: "cam2", start: 4, end: 4.1 }, // glance, ignored
+      { cameraId: "cam1", start: 4.1, end: 6 },
+      { cameraId: null, start: 6, end: 8 }, // looked away: ends the span
+      { cameraId: "cam2", start: 8, end: 11 },
+    ]);
+    expect(spans).toEqual([
+      { cameraId: "cam1", start: 0, seconds: 6 },
+      { cameraId: "cam2", start: 8, seconds: 3 },
+    ]);
+  });
+
+  it("charts spans in the debrief", () => {
+    const analytics = createShiftAnalytics();
+    analytics.startShift({
+      level: 1,
+      shiftSeconds: 60,
+      cameraIds: ["cam1", "cam2"],
+    });
+    look(analytics, "cam1", 0, 5);
+    look(analytics, "cam2", 5.1, 9);
+    look(analytics, "cam1", 9.1, 20);
+
+    const markup = buildDebriefMarkup(
+      analytics.endShift({ t: 20, completed: true }),
+    );
+    expect(markup).toContain("Attention span");
+    expect(markup.match(/class="chart-point"/g)).toHaveLength(3);
+  });
+});
+
+describe("gaze distance from suspects", () => {
+  it("logs distance to the nearest visible suspect, null when off the feeds", () => {
+    const analytics = createShiftAnalytics();
+    analytics.startShift({ level: 1, shiftSeconds: 60, cameraIds: ["cam1"] });
+    analytics.recordGaze({ ...gaze(0.5, "cam1"), world: { x: 0, y: 0 } }); // no suspect yet
+    analytics.recordEventStart(event("ev1", "npc1", 1));
+    analytics.recordSnapshot({
+      t: 1,
+      npcs: [
+        {
+          id: "npc1",
+          x: 5,
+          y: 5,
+          facingDeg: 0,
+          moving: false,
+          color: 0,
+          cameraIds: ["cam1"],
+        },
+        {
+          id: "bystander",
+          x: 2,
+          y: 4,
+          facingDeg: 0,
+          moving: false,
+          color: 0,
+          cameraIds: ["cam1"],
+        },
+      ],
+    });
+    analytics.recordGaze({ ...gaze(1, "cam1"), world: { x: 5, y: 8 } });
+    analytics.recordGaze({ ...gaze(1.1, "cam1"), world: { x: 5, y: 5 } }); // under 4 Hz, skipped
+    analytics.recordGaze({ ...gaze(1.5, null), world: null });
+
+    const report = analytics.endShift({ t: 60, completed: true });
+    expect(report.gazeDistance).toEqual([
+      { t: 1, tiles: 3, npcId: "npc1" },
+      { t: 1.5, tiles: null, npcId: "npc1" },
+    ]);
   });
 });
 

@@ -10,7 +10,12 @@ import type { AppEvents, ShiftReport } from "../shared/types";
 import { buildDebriefMarkup } from "./debriefPanel";
 import { createShiftAnalytics } from "./shiftAnalytics";
 
-export { buildDebriefMarkup } from "./debriefPanel";
+export {
+  MIN_GLANCE_SECONDS,
+  attentionSpans,
+  buildDebriefMarkup,
+  type AttentionSpan,
+} from "./debriefPanel";
 export {
   FLAG_GRACE_SECONDS,
   LOOKED_SECONDS,

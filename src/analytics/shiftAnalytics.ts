@@ -2,11 +2,13 @@ import type {
   ClassifiedEvent,
   FeedStats,
   Flag,
+  GazeDistanceSample,
   GazeSample,
   GazeSegment,
   ShiftEnd,
   ShiftReport,
   ShiftStart,
+  Vec2,
   WorldEvent,
   WorldSnapshot,
 } from "../shared/types";
@@ -17,6 +19,8 @@ export const FLAG_GRACE_SECONDS = 5;
 export const LOOKED_SECONDS = 1;
 /** Gaps between gaze samples longer than this (e.g. a paused tab) are not counted. */
 const MAX_SAMPLE_GAP = 0.5;
+/** Gaze-to-suspect distance is logged at most this often (4 Hz). */
+export const DISTANCE_SAMPLE_SECONDS = 0.25;
 
 interface OpenEvent {
   id: string;
@@ -54,10 +58,42 @@ export function createShiftAnalytics(): ShiftAnalytics {
   let trackerSeconds = 0;
   let lastGaze: GazeSample | null = null;
   let visibleOn = new Map<string, string[]>();
+  let positions = new Map<string, Vec2>();
+  let gazeDistance: GazeDistanceSample[] = [];
 
   const shown = (cameraId: string) => shift.cameraIds.includes(cameraId);
   const openEvents = () =>
     [...events.values()].filter((event) => event.end === null);
+
+  /** Logs how far the gaze is from the nearest suspect a shown feed sees. */
+  const recordDistance = (sample: GazeSample) => {
+    const last = gazeDistance.at(-1);
+    if (last && sample.t - last.t < DISTANCE_SAMPLE_SECONDS) return;
+    const suspects = openEvents()
+      .map((event) => event.npcId)
+      .filter((npcId) => visibleOn.get(npcId)?.some(shown))
+      .flatMap((npcId) => {
+        const at = positions.get(npcId);
+        return at ? [{ npcId, at }] : [];
+      });
+    if (suspects.length === 0) return;
+    const gaze = sample.world;
+    if (!gaze) {
+      gazeDistance.push({ t: sample.t, tiles: null, npcId: suspects[0].npcId });
+      return;
+    }
+    const nearest = suspects
+      .map(({ npcId, at }) => ({
+        npcId,
+        tiles: Math.hypot(at.x - gaze.x, at.y - gaze.y),
+      }))
+      .reduce((a, b) => (b.tiles < a.tiles ? b : a));
+    gazeDistance.push({
+      t: sample.t,
+      tiles: round(nearest.tiles),
+      npcId: nearest.npcId,
+    });
+  };
 
   return {
     startShift(start) {
@@ -69,10 +105,15 @@ export function createShiftAnalytics(): ShiftAnalytics {
       trackerSeconds = 0;
       lastGaze = null;
       visibleOn = new Map();
+      positions = new Map();
+      gazeDistance = [];
     },
 
     recordSnapshot(snapshot) {
       visibleOn = new Map(snapshot.npcs.map((npc) => [npc.id, npc.cameraIds]));
+      positions = new Map(
+        snapshot.npcs.map((npc) => [npc.id, { x: npc.x, y: npc.y }]),
+      );
       for (const event of openEvents()) {
         for (const id of visibleOn.get(event.npcId) ?? []) {
           if (shown(id)) event.cameraIds.add(id);
@@ -94,6 +135,8 @@ export function createShiftAnalytics(): ShiftAnalytics {
           end: sample.t,
         });
       }
+
+      recordDistance(sample);
 
       // Credit the time since the previous sample to what was watched then.
       const dt = previous ? sample.t - previous.t : 0;
@@ -180,14 +223,17 @@ export function createShiftAnalytics(): ShiftAnalytics {
 
       const caught = classified.filter((e) => e.outcome === "caught").length;
       const total = classified.length;
-      const score = Math.max(
-        0,
-        Math.min(
-          100,
-          Math.round(total > 0 ? (100 * caught) / total : 100) -
-            10 * falseFlags.length,
-        ),
-      );
+      // Ending the shift early forfeits it, even if nothing had happened yet.
+      const score = !end.completed
+        ? 0
+        : Math.max(
+            0,
+            Math.min(
+              100,
+              Math.round(total > 0 ? (100 * caught) / total : 100) -
+                10 * falseFlags.length,
+            ),
+          );
       const passed =
         end.completed &&
         caught >= Math.ceil(total / 2) &&
@@ -203,6 +249,7 @@ export function createShiftAnalytics(): ShiftAnalytics {
         falseFlags: [...falseFlags],
         feeds,
         timeline: timeline.map((segment) => ({ ...segment })),
+        gazeDistance: gazeDistance.map((sample) => ({ ...sample })),
         trackerSeconds: round(trackerSeconds),
       };
     },

@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type {
   CameraDef,
   TileType,
+  Vec2,
   WorldMap,
   WorldSnapshot,
 } from "../shared/types";
@@ -110,6 +111,14 @@ export class CameraFeed extends Phaser.GameObjects.Container {
       py >= this.y &&
       py < this.y + this.feedHeight
     );
+  }
+
+  /** Maps a canvas point (in pixels) on this feed back to building tile units. */
+  toWorld(px: number, py: number): Vec2 {
+    return {
+      x: this.minTileX + (px - this.x - this.viewX) / this.tileSize,
+      y: this.minTileY + (py - this.y - this.viewY) / this.tileSize,
+    };
   }
 
   /** Highlights the feed the player is looking at. */

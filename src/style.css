@@ -231,6 +231,67 @@ body {
   background: rgba(251, 146, 60, 0.45);
 }
 
+.line-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.line-chart .grid {
+  stroke: rgba(148, 163, 184, 0.15);
+  stroke-width: 1;
+}
+
+.line-chart .tick {
+  fill: #a5b4cf;
+  font-size: 10px;
+}
+
+.line-chart .chart-mark line {
+  stroke: rgba(226, 232, 240, 0.35);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* A wider invisible stroke makes the thin mark easy to hover. */
+.line-chart .chart-mark .mark-hit {
+  stroke: transparent;
+  stroke-width: 10;
+  stroke-dasharray: none;
+}
+
+.line-chart .avg {
+  stroke: #94a3b8;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.line-chart .line {
+  fill: none;
+  stroke: #4ade80;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* Points stay hidden until hovered; the larger transparent circle is the hit target. */
+.line-chart .hit {
+  fill: transparent;
+}
+
+.line-chart .dot {
+  fill: #4ade80;
+  stroke: #0f172a;
+  stroke-width: 2;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.line-chart .chart-point:hover .dot {
+  opacity: 1;
+}
+
 .heat-value {
   font-size: 1rem;
   font-weight: 700;

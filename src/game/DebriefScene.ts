@@ -66,7 +66,21 @@ export class DebriefScene extends Phaser.Scene {
     }
     addButton(this, 420, "Back to title", "Title");
     if (report) {
-      addText(this, 490, "Full debrief below ↓", 14, "#6b7383");
+      // The full debrief is the HTML panel under the canvas; scroll to it.
+      addText(this, 490, "Full debrief below ↓", 16, "#9ca3af")
+        .setPadding(12, 6)
+        .setInteractive({ useHandCursor: true })
+        .on("pointerover", function (this: Phaser.GameObjects.Text) {
+          this.setColor("#f3f4f6");
+        })
+        .on("pointerout", function (this: Phaser.GameObjects.Text) {
+          this.setColor("#9ca3af");
+        })
+        .on("pointerdown", () =>
+          document
+            .getElementById("analytics-panel")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        );
     }
   }
 }
