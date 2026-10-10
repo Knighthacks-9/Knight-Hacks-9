@@ -11,12 +11,10 @@ import {
   type GazePoint,
   type GazeSettings,
   type GazeSource,
-} from "../vision";
-import {
   mediaPipeGazeTracker,
   type TrackerPhase,
   type TrackerStatus,
-} from "../vision/MediaPipeGazeTracker";
+} from "./index";
 import { eventBus } from "../shared/eventBus";
 
 const SETTINGS_KEY = "night-watch:gaze-settings";
@@ -157,12 +155,6 @@ export class CalibrationScene extends Phaser.Scene {
     );
     this.createOverlayUi();
 
-    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-      this.updateMousePoint(pointer);
-    });
-    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      this.updateMousePoint(pointer);
-    });
     this.input.keyboard?.on("keydown-ESC", () => {
       if (this.mode === "calibrating") {
         this.cancelCalibration("Calibration cancelled.");
@@ -664,16 +656,6 @@ export class CalibrationScene extends Phaser.Scene {
     }
     void mediaPipeGazeTracker.start().catch(() => {
       this.updateTrackerStatus(mediaPipeGazeTracker.getStatus());
-    });
-  }
-
-  private updateMousePoint(pointer: Phaser.Input.Pointer): void {
-    const canvas = this.game.canvas;
-    const bounds = canvas.getBoundingClientRect();
-    if (bounds.width === 0 || bounds.height === 0) return;
-    this.gaze.setMousePoint({
-      x: Phaser.Math.Clamp(pointer.x / this.scale.width, 0, 1),
-      y: Phaser.Math.Clamp(pointer.y / this.scale.height, 0, 1),
     });
   }
 

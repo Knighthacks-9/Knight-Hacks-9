@@ -9,7 +9,7 @@ import {
   EYE_LANDMARKS,
   extractGazeFeatures,
 } from "./gazeFeatures";
-import { gazeController } from "./index";
+import { gazeController } from "./gazeController";
 
 export type TrackerPhase =
   | "idle"

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "shift_start",
+    "text": "Dispatch to control room. Your shift has started. Keep your eyes on the feeds and report anything suspicious."
+  },
+  {
+    "id": "shift_end",
+    "text": "Dispatch to control room. That's the end of your shift. Stand by for your debrief."
+  },
+  {
+    "id": "check_camera_1",
+    "text": "Control, we've had a report near camera one. Take a look."
+  },
+  {
+    "id": "check_camera_2",
+    "text": "Control, check camera two for me."
+  },
+  {
+    "id": "check_camera_3",
+    "text": "Control, eyes on camera three, please."
+  },
+  {
+    "id": "check_camera_4",
+    "text": "Control, can you confirm what's happening on camera four?"
+  },
+  {
+    "id": "report_received",
+    "text": "Copy that, control. Report received. We're sending someone over."
+  },
+  {
+    "id": "stay_alert",
+    "text": "Dispatch to control room. Quiet night so far. Stay alert."
+  }
+]

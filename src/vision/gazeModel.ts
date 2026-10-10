@@ -1,5 +1,5 @@
 import type { GazeFeatures } from "./gazeFeatures";
-import type { GazePoint } from "./index";
+import type { GazePoint } from "./gazeController";
 
 export const GAZE_FEATURE_KEYS = [
   "eyeX",

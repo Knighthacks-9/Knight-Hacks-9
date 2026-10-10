@@ -54,9 +54,45 @@ returns a smoothed canvas point (0..1), `getSource()` reports `tracker`,
 `mouse`, or `none`, and `isBlinking()` reports blinks. Gaze is held for up to
 350 ms through blinks and dropped frames before falling back to the mouse.
 
+### Radio voice (ElevenLabs)
+
+The dispatcher voice and push-to-talk use ElevenLabs, with the free browser
+speech APIs as an automatic fallback. During a shift, **hold Space** to radio
+in and release to send; a `● TRANSMITTING` indicator shows while you talk, and
+the transcript is published on the event bus as `radio:report`.
+
+The ElevenLabs key never reaches the browser. Two Netlify Functions proxy the
+API: `/api/tts` (text to speech, max 500 characters) and `/api/stt`
+(speech to text with the `scribe_v2` model). ElevenLabs error codes pass
+through; after a 401 (bad key) or 429 (out of credits) the game uses browser
+speech for the rest of the session. The browser console logs which provider
+handled each line (`[voice] TTS provider: …`).
+
+**Set up the keys.** Copy `.env.example` to `.env` (git-ignored) and fill in
+`ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`. On Netlify, add the same two
+variables under Site configuration → Environment variables.
+
+**Run with the functions locally.** `npm run dev:netlify` starts Netlify's
+dev server (via `npx netlify-cli`) at <http://localhost:8888>, which serves the
+Vite app and the functions and reads `.env`. Plain `npm run dev` has no
+functions, so voice falls back to the browser APIs.
+
+**Save credits.** Add `?voice=free` to the URL to skip ElevenLabs entirely.
+
+**Pre-generate dispatcher lines.** `npm run voice:generate` reads
+`scripts/voice-lines.json` and writes `public/audio/dispatch_<id>.mp3` using
+the key in `.env`. Existing files are skipped, so re-running only pays for new
+or deleted lines. Play one in code with `playDispatchLine(id, text)` from
+`src/audio`, which costs nothing and falls back to `speak(text)`.
+
+Voice needs Netlify (or `npm run dev:netlify`). The GitHub Pages build has no
+functions, so there it always uses the browser fallbacks.
+
 ## Scripts
 
 - `npm run dev` — start the Vite development server
+- `npm run dev:netlify` — run Vite plus the voice functions (Netlify dev)
+- `npm run voice:generate` — pre-generate dispatcher lines with ElevenLabs
 - `npm run build` — type-check and create the production build
 - `npm run preview` — serve the production build locally
 - `npm run lint` — run ESLint
@@ -66,16 +102,60 @@ returns a smoothed canvas point (0..1), `getSource()` reports `tracker`,
 
 ## Team ownership
 
-- **Person 1 — Vision:** `src/vision/` — webcam capture, MediaPipe face/eye
-  tracking, gaze mapping, calibration, tuning, and mouse fallback
-- **Person 2 — World:** `src/world/` — map, NPC, and pathfinding placeholder
-- **Person 3 — Game:** `src/game/` — Phaser scenes and scene-flow placeholder
-- **Person 4 — Analytics:** `src/analytics/` — logging, scoring, and debrief
-  data placeholder
-- **Shared:** `src/shared/` — types and the shared event bus
+| Folder           | Owner    | What lives there                                                           |
+| ---------------- | -------- | -------------------------------------------------------------------------- |
+| `src/vision/`    | Person 1 | Webcam, MediaPipe tracking, gaze model, calibration scene, mouse fallback  |
+| `src/world/`     | Person 2 | Map, cameras, A\* pathfinding, NPC routines and suspicious behaviors       |
+| `src/game/`      | Person 3 | Title, Shift, and Debrief scenes, camera feeds, levels                     |
+| `src/analytics/` | Person 4 | Shift logging, catch/miss classification, debrief report and panel         |
+| `src/audio/`     | Shared   | Dispatcher voice and push-to-talk (`netlify/functions` proxies ElevenLabs) |
+| `src/shared/`    | Everyone | `types.ts` (the contract) and `eventBus.ts`                                |
 
-Modules should communicate through `src/shared/eventBus.ts` and the shared types
-in `src/shared/types.ts`, rather than importing one another's internals.
+`src/main.ts` boots Phaser, registers the scenes, installs analytics, and
+attaches the mouse fallback.
+
+## How the modules fit together
+
+The Shift scene owns the clock. Each frame it emits `sim:tick`; the world
+answers with `world:snapshot`, the feeds draw the NPCs each camera sees, and
+the scene turns the vision module's gaze point into the watched feed and emits
+`gaze:sample`. Analytics listens to everything and answers `shift:end` with
+`analytics:report`, which the Debrief scene and the HTML debrief panel show.
+
+```text
+ShiftScene ── sim:tick ──▶ world ── world:snapshot, world:suspiciousStart/End ──▶ feeds, analytics
+    │  gazeController.getPoint() → watched feed ── gaze:sample ──▶ analytics
+    │  click an NPC ── flag:created ──▶ analytics
+    └─ shift:start / shift:end ──▶ analytics ── analytics:report ──▶ DebriefScene, debrief panel
+```
+
+| Event                           | Payload         | Emitted by | Used by                      |
+| ------------------------------- | --------------- | ---------- | ---------------------------- |
+| `scene:navigate`                | `SceneKey`      | any scene  | `main.ts`, analytics (panel) |
+| `shift:start`                   | `ShiftStart`    | game       | analytics                    |
+| `sim:tick`                      | `SimTick`       | game       | world                        |
+| `world:map`                     | `WorldMap`      | world      | game, analytics              |
+| `world:snapshot`                | `WorldSnapshot` | world      | game, analytics              |
+| `world:suspiciousStart` / `End` | `WorldEvent`    | world      | analytics                    |
+| `gaze:sample`                   | `GazeSample`    | game       | analytics                    |
+| `flag:created`                  | `Flag`          | game       | analytics                    |
+| `shift:end`                     | `ShiftEnd`      | game       | analytics                    |
+| `analytics:report`              | `ShiftReport`   | analytics  | game                         |
+
+Rules:
+
+- Change `src/shared/types.ts` together: it is the only thing every module
+  depends on, and a payload change needs both the sender and the listeners.
+- Import another module only through its `index.ts` (`../vision`,
+  `../world`, `../analytics`), never its internal files. Phaser scenes are the
+  one exception: `main.ts` imports them directly so each `index.ts` stays
+  loadable in tests.
+- Times in payloads are shift seconds from `sim:tick`, so gaze, world events,
+  and flags share one timeline.
+- Work on feature branches and open pull requests.
+
+Dev shortcuts: `/?level=4` starts at level 4, and `/src/world/world-debug.html`
+runs the world on its own with a top-down view.
 
 ## GitHub Pages
 

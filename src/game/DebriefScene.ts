@@ -1,6 +1,12 @@
 import Phaser from "phaser";
-import { LEVELS, LEVEL_COMPLETED_KEY, LEVEL_KEY } from "./levels";
-import { FLAG_COUNT_KEY } from "./ShiftScene";
+import type { ShiftReport } from "../shared/types";
+import {
+  FEED_LIMIT_KEY,
+  LEVELS,
+  LEVEL_KEY,
+  REPORT_KEY,
+  getFeedLayout,
+} from "./levels";
 import { addButton, addText } from "./ui";
 
 export class DebriefScene extends Phaser.Scene {
@@ -9,49 +15,58 @@ export class DebriefScene extends Phaser.Scene {
   }
 
   create(): void {
-    const flags =
-      (this.registry.get(FLAG_COUNT_KEY) as number | undefined) ?? 0;
     const level = (this.registry.get(LEVEL_KEY) as number | undefined) ?? 1;
-    const completed =
-      (this.registry.get(LEVEL_COMPLETED_KEY) as boolean | undefined) ?? false;
+    const report = this.registry.get(REPORT_KEY) as ShiftReport | undefined;
+    const passed = report?.passed ?? false;
     const isLastLevel = level >= LEVELS.length;
 
     addText(
       this,
-      130,
-      completed ? `Level ${level} complete` : "Level not passed",
+      110,
+      passed ? `Level ${level} complete` : "Level not passed",
       48,
       "#f3f4f6",
       true,
     );
-    addText(
-      this,
-      220,
-      `You flagged ${flags} ${flags === 1 ? "person" : "people"}.`,
-      24,
-    );
-    // TODO: show analytics debrief (heatmap, timeline) once the analytics module lands.
-    addText(this, 270, "Detailed debrief coming soon.", 16, "#9ca3af");
 
-    if (!completed) {
+    if (!report) {
+      addText(this, 200, "No analytics report was recorded.", 20, "#fbbf24");
+    } else {
+      const caught = report.events.filter((e) => e.outcome === "caught").length;
       addText(
         this,
-        330,
-        "Flag at least one person and finish the shift to pass.",
-        18,
-        "#fbbf24",
+        190,
+        `Caught ${caught} of ${report.events.length} suspicious ${report.events.length === 1 ? "person" : "people"} · ${report.falseFlags.length} false ${report.falseFlags.length === 1 ? "flag" : "flags"}`,
+        22,
       );
+      addText(this, 232, `Score ${report.score}`, 20, "#9ca3af");
+      if (!passed) {
+        addText(
+          this,
+          290,
+          report.completed
+            ? "Catch at least half of them, without more false flags than catches."
+            : "You ended the shift early.",
+          18,
+          "#fbbf24",
+        );
+      }
     }
 
-    if (completed && !isLastLevel) {
-      const next = LEVELS[level].screens;
-      addText(this, 330, `Next shift: ${next} screens`, 20, "#fbbf24");
-      addButton(this, 400, "Next level", "Shift", () =>
+    if (passed && !isLastLevel) {
+      const feedLimit =
+        (this.registry.get(FEED_LIMIT_KEY) as number | undefined) ?? Infinity;
+      const next = getFeedLayout(level + 1, feedLimit).screens;
+      addText(this, 290, `Next shift: ${next} screens`, 20, "#fbbf24");
+      addButton(this, 360, "Next level", "Shift", () =>
         this.registry.set(LEVEL_KEY, level + 1),
       );
     } else {
-      addButton(this, 400, completed ? "Replay level" : "Retry level", "Shift");
+      addButton(this, 360, passed ? "Replay level" : "Retry level", "Shift");
     }
-    addButton(this, 460, "Back to title", "Title");
+    addButton(this, 420, "Back to title", "Title");
+    if (report) {
+      addText(this, 490, "Full debrief below ↓", 14, "#6b7383");
+    }
   }
 }

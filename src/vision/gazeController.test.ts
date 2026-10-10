@@ -5,7 +5,7 @@ import {
   DEFAULT_GAZE_SETTINGS,
   GazeController,
   TRACKER_HOLD_MS,
-} from "./index";
+} from "./gazeController";
 import { OneEuroFilter } from "./oneEuroFilter";
 
 // Screen x = 0.5 - eyeX and screen y = 0.5 + eyeY, with everything else ignored.

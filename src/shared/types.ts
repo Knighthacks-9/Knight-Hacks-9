@@ -1,30 +1,10 @@
+// The contract between modules. Modules talk only through these event payloads
+// (see AppEvents) and each other's public index.ts, never internal files.
+//
+// Time: every payload with `t` uses shift seconds from sim:tick, so gaze,
+// world events, and flags line up on one timeline.
+
 export type SceneKey = "Title" | "Calibration" | "Shift" | "Debrief";
-
-export interface Attention {
-  scene: SceneKey;
-  focus: number;
-  confidence?: number;
-  timestamp: number;
-  x?: number;
-  y?: number;
-  lookingAtTarget?: boolean;
-  targetId?: string;
-}
-
-export interface WorldEvent {
-  type: string;
-  label?: string;
-  scene: SceneKey;
-  metadata?: Record<string, unknown>;
-  timestamp: number;
-}
-
-export interface Flag {
-  id: string;
-  value: boolean;
-  scene: SceneKey;
-  timestamp: number;
-}
 
 // ---------------------------------------------------------------------------
 // World (Person 2). All positions are in tile units; multiply by tile size to
@@ -103,24 +83,127 @@ export interface WorldEvent {
   cameraIds: string[];
 }
 
+// ---------------------------------------------------------------------------
+// Game (Person 3) and Vision (Person 1).
+// ---------------------------------------------------------------------------
+
 /** Emitted by the game every frame. dt and t are in seconds. */
 export interface SimTick {
   dt: number;
   t: number;
 }
 
+export interface ShiftStart {
+  level: number;
+  shiftSeconds: number;
+  /** Cameras shown on screen this shift, in grid order. */
+  cameraIds: string[];
+}
+
+export interface ShiftEnd {
+  t: number;
+  /** False when the player ended the shift early. */
+  completed: boolean;
+}
+
+export type GazeSource = "tracker" | "mouse" | "none";
+
+/** Emitted by the game every frame during a shift. */
+export interface GazeSample {
+  t: number;
+  /** Canvas position 0..1, or null when nothing is tracked. */
+  x: number | null;
+  y: number | null;
+  source: GazeSource;
+  /** Camera feed under the gaze point, or null when off the feeds. */
+  cameraId: string | null;
+}
+
+/** The player clicked an NPC on a camera feed. */
+export interface Flag {
+  t: number;
+  npcId: string;
+  cameraId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Audio: radio dispatcher voice and push-to-talk.
+// ---------------------------------------------------------------------------
+
+/** Which service produced speech or a transcript. */
+export type VoiceProvider = "elevenlabs" | "browser";
+
+/** A push-to-talk transmission from the player, transcribed. */
+export interface RadioReport {
+  text: string;
+  /** Shift seconds when the player started talking. */
+  t: number;
+  provider: VoiceProvider;
+}
+
+// ---------------------------------------------------------------------------
+// Analytics (Person 4): the debrief report, built when a shift ends.
+// ---------------------------------------------------------------------------
+
+export type EventOutcome = "caught" | "missed-not-looking" | "missed-looking";
+
+export interface ClassifiedEvent {
+  id: string;
+  npcId: string;
+  behavior: SuspiciousBehavior;
+  start: number;
+  /** Null if the shift ended while the behavior was still going. */
+  end: number | null;
+  /** Every camera that saw the NPC during the event. */
+  cameraIds: string[];
+  outcome: EventOutcome;
+  /** Seconds the player spent looking at a feed that showed the NPC. */
+  watchedSeconds: number;
+  flaggedAt: number | null;
+}
+
+export interface FeedStats {
+  cameraId: string;
+  watchedSeconds: number;
+  /** Share of the shift spent on this feed, 0..1. */
+  share: number;
+  events: number;
+  caught: number;
+  missed: number;
+}
+
+/** A stretch of time the gaze stayed on one feed (or off all feeds). */
+export interface GazeSegment {
+  cameraId: string | null;
+  start: number;
+  end: number;
+}
+
+export interface ShiftReport {
+  level: number;
+  duration: number;
+  completed: boolean;
+  passed: boolean;
+  score: number;
+  events: ClassifiedEvent[];
+  falseFlags: Flag[];
+  feeds: FeedStats[];
+  timeline: GazeSegment[];
+  /** Seconds gaze came from the webcam tracker (the rest is mouse or none). */
+  trackerSeconds: number;
+}
+
 export type AppEvents = {
   "scene:navigate": SceneKey;
-  "vision:attention": Attention;
-  "vision:gaze": Attention;
-  "world:event": WorldEvent;
-  "world:flag": Flag;
-  "analytics:world-event": WorldEvent;
-  "analytics:flag": Flag;
+  "shift:start": ShiftStart;
+  "shift:end": ShiftEnd;
   "sim:tick": SimTick;
   "world:map": WorldMap;
   "world:snapshot": WorldSnapshot;
   "world:suspiciousStart": WorldEvent;
   "world:suspiciousEnd": WorldEvent;
+  "gaze:sample": GazeSample;
   "flag:created": Flag;
+  "radio:report": RadioReport;
+  "analytics:report": ShiftReport;
 };

@@ -4,3 +4,9 @@ coverage/
 .DS_Store
 *.log
 *.tsbuildinfo
+
+# Secrets and Netlify local state
+.env
+.env.*
+!.env.example
+.netlify/
