@@ -8,9 +8,9 @@ export const FEED_LIMIT_KEY = "feedLimit";
 /** Shift length chosen on the title screen, in seconds. */
 export const SHIFT_SECONDS_KEY = "shiftSeconds";
 export const DEFAULT_SHIFT_SECONDS = 120;
-// The world spreads suspicious events over roughly (shift - 60 s), so much
-// shorter shifts would spawn every event in the first few seconds.
-export const MIN_SHIFT_SECONDS = 90;
+// The world shrinks its end-of-shift margins on short shifts, so events
+// still spread out even at the minimum.
+export const MIN_SHIFT_SECONDS = 30;
 export const MAX_SHIFT_SECONDS = 600;
 export const SHIFT_SECONDS_STEP = 30;
 const SHIFT_STORAGE_KEY = "night-watch:shift-seconds";
