@@ -1,5 +1,5 @@
 // Screen 3: WATCH_STATION.EXE, the maximized shift window. Camera workspace
-// on the left (4, 6, or 9 feeds, focus mode, report mode, pop-ups, glitches);
+// on the left (4 or 6 feeds, focus mode, report mode, pop-ups, glitches);
 // side console on the right (report control, dispatch radio, end shift).
 import { dispatchText, playSfx, sayDispatch, speak } from "../../audio";
 import { eventBus } from "../../shared/eventBus";
@@ -19,6 +19,7 @@ import {
 import { DistractionManager } from "../watch/distractions";
 import { FeedRenderer } from "../watch/feedRenderer";
 import { GlitchScheduler } from "../watch/glitch";
+import { createMinimap } from "../watch/minimap";
 import { DispatchRadio, type RadioMessage } from "../watch/radio";
 import { parseCameraCommand } from "../watch/voiceCommand";
 import { createWindow } from "../window";
@@ -145,14 +146,22 @@ export const mountWatchStation: Screen = (ctx, params) => {
     "data-count": String(config.cameraCount),
   });
   const popups = h("div", { class: "ws-popups" });
-  const stage = h("div", { class: "ws-stage" }, grid, popups);
+  const minimap = createMinimap(() => playSfx("click"));
+  minimap.setMap(null); // enabled once the shift has its map
+  const stage = h(
+    "div",
+    { class: "ws-stage" },
+    grid,
+    popups,
+    minimap.panel,
+  );
   const workspace = h(
     "div",
     { class: "ws-workspace" },
     h(
       "div",
       { class: "ws-toolbar" },
-      tabs,
+      h("div", { class: "ws-toolbar-left" }, tabs, minimap.button),
       h("div", { class: "ws-toolbar-right" }, restoreButton, online),
     ),
     banner,
@@ -415,6 +424,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   }
 
   function buildFeeds(s: ShiftSession): void {
+    minimap.setMap(s.map);
     views = s.cameras.map((feed, index) => {
       const canvas = h("canvas", {
         class: "feed-canvas",

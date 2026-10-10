@@ -34,20 +34,19 @@ describe("local NightwatchService", () => {
     globalThis.localStorage = memoryStorage();
   });
 
-  it("maps levels to 4, 6 and 9 cameras", async () => {
+  it("maps levels to 4, 6 and 6 real cameras", async () => {
     const service = createLocalNightwatchService(mitt<AppEvents>());
     for (const [level, count] of [
       [1, 4],
       [2, 6],
-      [3, 9],
+      [3, 6],
     ]) {
       const cameras = await service.getCameras(level);
       expect(cameras).toHaveLength(count);
       expect(cameras[0].label).toBe("CAM_01");
+      // Every feed is a real world camera; no placeholder feeds.
+      expect(cameras.every((c) => c.source)).toBe(true);
     }
-    // The world has six cameras; the rest are marked placeholders.
-    const nine = await service.getCameras(3);
-    expect(nine.filter((c) => c.source)).toHaveLength(6);
     expect(levelConfig(99).level).toBe(3);
   });
 

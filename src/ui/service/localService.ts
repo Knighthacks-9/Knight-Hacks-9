@@ -39,23 +39,13 @@ import type {
 export const LEVELS: readonly LevelConfig[] = [
   { level: 1, cameraCount: 4, expectedAnomalies: 3 },
   { level: 2, cameraCount: 6, expectedAnomalies: 5 },
-  { level: 3, cameraCount: 9, expectedAnomalies: 8 },
+  // Same six cameras as level 2 (the world has six), with more anomalies.
+  { level: 3, cameraCount: 6, expectedAnomalies: 8 },
 ];
 
 export function levelConfig(level: number): LevelConfig {
   return LEVELS[Math.min(Math.max(Math.round(level), 1), LEVELS.length) - 1];
 }
-
-// MOCK: the world sim has six cameras, but level 3 shows nine. These extra
-// feeds draw a placeholder scene and never show anomalies. Give them an
-// imageUrl (e.g. "assets/feeds/perimeter.jpg" in public/) or replace them
-// with real cameras once the world provides more.
-const PLACEHOLDER_FEEDS: { id: string; location: string; imageUrl?: string }[] =
-  [
-    { id: "mock-perimeter", location: "Perimeter" },
-    { id: "mock-west-lot", location: "West Lot" },
-    { id: "mock-garage", location: "Garage" },
-  ];
 
 const BEHAVIORS: SuspiciousBehavior[] = [
   "loitering",
@@ -85,21 +75,13 @@ function feedLabel(index: number): string {
 }
 
 function camerasFor(map: WorldMap, count: number): CameraFeed[] {
-  const world: CameraFeed[] = map.cameras.map((camera, i) => ({
+  return map.cameras.slice(0, count).map((camera, i) => ({
     id: camera.id,
     label: feedLabel(i),
     location: camera.name,
     online: true,
     source: camera,
   }));
-  const placeholders: CameraFeed[] = PLACEHOLDER_FEEDS.map((feed, i) => ({
-    id: feed.id,
-    label: feedLabel(world.length + i),
-    location: feed.location,
-    imageUrl: feed.imageUrl,
-    online: true,
-  }));
-  return [...world, ...placeholders].slice(0, count);
 }
 
 function trackerActive(): boolean {

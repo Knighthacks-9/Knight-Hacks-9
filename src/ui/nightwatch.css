@@ -1392,6 +1392,49 @@ body.nw {
   gap: 4px;
 }
 
+.ws-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-map-button {
+  padding: 6px 10px;
+  font-family: var(--font-pixel);
+  font-size: 8px;
+}
+
+.ws-map-button[aria-pressed="true"] {
+  background: #a5ada2;
+}
+
+/* Building map overlay, over the top-left of the camera grid. */
+.ws-minimap {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 6px;
+  background: #0b0f0d;
+  border: 2px solid var(--chrome);
+  box-shadow: 4px 4px 0 #000a;
+}
+
+.ws-minimap-title {
+  margin-bottom: 4px;
+  color: #9ca3af;
+  font-family: var(--font-pixel);
+  font-size: 8px;
+}
+
+.ws-minimap-canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+
 .ws-tab {
   padding: 6px 10px;
   background: var(--chrome);
