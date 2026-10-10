@@ -3,6 +3,7 @@
 // feeds (no world camera) draw a static scene or their imageUrl instead.
 // The canvas renders at reduced resolution and is scaled up pixelated.
 import type {
+  NpcSnapshot,
   TileType,
   Vec2,
   WorldMap,
@@ -39,6 +40,54 @@ export type GlitchKind =
   "jitter" | "split" | "static" | "contrast" | "interference" | "scan";
 
 let grain: HTMLCanvasElement | null = null;
+
+/** Total length of the two red flashes when an anomaly starts, per level. */
+const FLASH_SECONDS: Record<number, number> = { 2: 2, 3: 1 };
+/** Embers around an anomaly on level 3. */
+const PARTICLES = 10;
+
+/** Flashes and particles keep going this long after an anomaly ends. */
+const LINGER_SECONDS = 0.4;
+
+/**
+ * Shift time each NPC's current (or just-finished) anomaly started and ended,
+ * shared by every feed so the level 2-3 flash happens once, when the anomaly
+ * begins, not per feed.
+ */
+const anomalyStart = new Map<string, number>();
+const anomalyEnd = new Map<string, number>();
+let lastSnapshotT = -1;
+function trackAnomalies(snapshot: WorldSnapshot | null): void {
+  if (!snapshot || snapshot.t === lastSnapshotT) return;
+  // A new shift restarts the clock (and reuses NPC ids): forget the old one.
+  if (snapshot.t < lastSnapshotT) {
+    anomalyStart.clear();
+    anomalyEnd.clear();
+  }
+  lastSnapshotT = snapshot.t;
+  for (const npc of snapshot.npcs) {
+    if (npc.suspicious) {
+      if (!anomalyStart.has(npc.id) || anomalyEnd.has(npc.id)) {
+        anomalyStart.set(npc.id, snapshot.t);
+      }
+      anomalyEnd.delete(npc.id);
+    } else if (anomalyStart.has(npc.id)) {
+      const end = anomalyEnd.get(npc.id);
+      if (end === undefined) anomalyEnd.set(npc.id, snapshot.t);
+      else if (snapshot.t - end > LINGER_SECONDS) {
+        anomalyStart.delete(npc.id);
+        anomalyEnd.delete(npc.id);
+      }
+    }
+  }
+}
+
+/** True while an NPC is doing an anomaly or within LINGER_SECONDS after. */
+function anomalyEffects(npc: NpcSnapshot, now: number): boolean {
+  if (npc.suspicious) return true;
+  const end = anomalyEnd.get(npc.id);
+  return end !== undefined && now - end <= LINGER_SECONDS;
+}
 
 /** NPC sprite sheets, loaded once and shared by every feed. */
 const sheets = new Map<string, HTMLImageElement>();
@@ -111,6 +160,8 @@ export class FeedRenderer {
     private readonly canvas: HTMLCanvasElement,
     private readonly feed: CameraFeed,
     private readonly map: WorldMap | null,
+    /** Shift level: picks how anomalies are highlighted (see drawPeople). */
+    private readonly level = 1,
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.grainPattern = this.ctx.createPattern(grainTile(), "repeat");
@@ -200,6 +251,8 @@ export class FeedRenderer {
   ) {
     const id = this.feed.id;
     const r = Math.max(2, this.tileSize * 0.42);
+    const now = snapshot?.t ?? t;
+    trackAnomalies(snapshot);
     // Draw back to front so people lower on screen overlap those behind.
     const inView = (snapshot?.npcs ?? [])
       .filter((npc) => npc.cameraIds.includes(id))
@@ -218,7 +271,7 @@ export class FeedRenderer {
         const col = npc.moving ? Math.floor(t * NPC_WALK_FPS) % 4 : 0;
         const size = Math.max(8, this.tileSize * NPC_FRAME_TILES);
         f.imageSmoothingEnabled = false;
-        f.filter = "saturate(0.55) brightness(0.9)"; // dim to the monitor look
+        f.filter = this.npcFilter(npc, now);
         f.drawImage(
           sheet,
           col * NPC_FRAME,
@@ -231,6 +284,9 @@ export class FeedRenderer {
           Math.round(size),
         );
         f.filter = "none";
+        if (this.level >= 3 && anomalyEffects(npc, now)) {
+          this.drawParticles(f, npc.id, x, y, size, now);
+        }
         continue;
       }
       // Sheets still loading: the original dot-and-head marker.
@@ -246,7 +302,7 @@ export class FeedRenderer {
         Math.PI * 2,
       );
       f.fill();
-      f.fillStyle = muted(npc.color);
+      f.fillStyle = npc.suspicious ? "#ff4040" : muted(npc.color);
       f.beginPath();
       f.arc(x, y, r, 0, Math.PI * 2);
       f.fill();
@@ -262,6 +318,53 @@ export class FeedRenderer {
         Math.PI * 2,
       );
       f.fill();
+    }
+  }
+
+  /**
+   * Normal people are dimmed to the monitor look. On level 1 an NPC doing an
+   * anomaly is tinted red the whole time. On levels 2 and 3 they only flash
+   * bright red twice when the anomaly starts (over 2s and 1s, FLASH_SECONDS)
+   * and then look normal again; level 3 also has rising red particles
+   * (drawParticles).
+   */
+  private npcFilter(npc: NpcSnapshot, now: number): string {
+    const normal = "saturate(0.55) brightness(0.9)";
+    const flash = FLASH_SECONDS[this.level];
+    if (flash === undefined) {
+      return npc.suspicious
+        ? "sepia(1) saturate(6) hue-rotate(-40deg) brightness(1.1) drop-shadow(0 0 2px #ff3030)"
+        : normal;
+    }
+    // A short anomaly's flash keeps going for LINGER_SECONDS after it ends.
+    if (!anomalyEffects(npc, now)) return normal;
+    const since = now - (anomalyStart.get(npc.id) ?? now);
+    // on, off, on, off (each a quarter of the flash), then back to normal.
+    const on = since < flash && Math.floor(since / (flash / 4)) % 2 === 0;
+    return on
+      ? "sepia(1) saturate(10) hue-rotate(-50deg) brightness(1.8) drop-shadow(0 0 4px #ff0000)"
+      : normal;
+  }
+
+  /** Small red embers drifting up around an anomaly (level 3). */
+  private drawParticles(
+    f: CanvasRenderingContext2D,
+    npcId: string,
+    x: number,
+    feetY: number,
+    size: number,
+    now: number,
+  ) {
+    const seed = npcId.length * 13 + npcId.charCodeAt(npcId.length - 1);
+    const dot = Math.max(1, Math.round(size / 16));
+    for (let i = 0; i < PARTICLES; i++) {
+      // Each particle loops bottom to top, staggered so they don't sync up.
+      const phase = (now * 0.7 + i / PARTICLES + hash(seed, i)) % 1;
+      const drift = Math.sin(now * 2 + i * 1.7) * size * 0.06;
+      const px = x + (hash(i, seed) - 0.5) * size * 0.55 + drift;
+      const py = feetY - phase * size * 0.85;
+      f.fillStyle = `rgba(255,${Math.round(40 + 60 * hash(seed, i + 9))},40,${(1 - phase).toFixed(2)})`;
+      f.fillRect(Math.round(px), Math.round(py), dot, dot);
     }
   }
 
