@@ -1,5 +1,5 @@
 // Screen 1: the desktop. Wallpaper, shortcuts, taskbar and Start menu are
-// permanent; the NIGHTWATCH main-menu window is the "desktop" screen.
+// permanent; the KNIGHT'S EYE main-menu window is the "desktop" screen.
 import { playSfx } from "../../audio";
 import {
   MAX_SHIFT_SECONDS,
@@ -14,8 +14,8 @@ import { ICONS } from "../icons";
 import { openFloatingWindow } from "../window";
 
 const README = [
-  "NIGHTWATCH v1.04 - ATTENTION TRAINING",
-  "======================================",
+  "KNIGHT'S EYE v1.04 - ATTENTION TRAINING",
+  "=======================================",
   "",
   "1. GAZE SETUP",
   "   Tune sensitivity and smoothing. Enable the webcam and run the",
@@ -42,6 +42,73 @@ const README = [
   "Classic version: add ?ui=classic to the address.",
 ].join("\n");
 
+const ATTRIBUTIONS = [
+  "KNIGHT'S EYE - ATTRIBUTIONS",
+  "===========================",
+  "",
+  "Character sprites were made by these artists.",
+  "All artwork belongs to its creators.",
+  "",
+  '"Office Worker Sprite" by 0rdinarystrawberry',
+  "   https://www.deviantart.com/0rdinarystrawberry/art/Office-Worker-Sprite-733836592",
+  "",
+  '"Malvia" by 0rdinarystrawberry',
+  "   https://www.deviantart.com/0rdinarystrawberry/art/Malvia-794912205",
+  "",
+  '"ALOLA - Employe" by wergan',
+  "   https://www.deviantart.com/wergan/art/ALOLA---Employe-1333454091",
+].join("\n");
+
+const CREDITS = [
+  "KNIGHT'S EYE - CREDITS",
+  "======================",
+  "",
+  "Developed by:",
+  "",
+  "Lilly Liu",
+  "   University of Florida",
+  "   3rd year, Computer Science",
+  "   https://www.linkedin.com/in/lilly-x-liu/",
+  "   Contributions:",
+  "    - Computer Vision Eye Tracking",
+  "    - AI Dispatcher",
+  "    - User Interface Design",
+  "    - Project Lead",
+  "",
+  "Karam Hack",
+  "   University of Central Florida",
+  "   Master's student, Cybersecurity",
+  "   https://www.linkedin.com/in/karamhack/",
+  "   Contributions:",
+  "    - CCTV Gameplay",
+  "    - Startup Sequence",
+  "    - Website Hosting",
+  "",
+  "Dev Shill",
+  "   University of Central Florida",
+  "   1st year, Computer Science",
+  "   https://www.linkedin.com/in/dev-shill-0a4ba4440/",
+  "   Contributions:",
+  "    - World & AI Gameplay",
+  "    - Character Sprite Sourcing",
+  "    - Mini Map",
+  "",
+  "Sanjana Metla",
+  "   University of Central Florida",
+  "   3rd year, Information Technology",
+  "   https://www.linkedin.com/in/sanjana-metla",
+  "   Contributions:",
+  "    - Analytics & Feedback Statistics",
+  "    - Debrief Interface",
+  "    - Presentation Author",
+].join("\n");
+
+const TEXT_FILES = [
+  { name: "Readme.txt", text: README },
+  { name: "Credits.txt", text: CREDITS },
+  { name: "Attributions.txt", text: ATTRIBUTIONS },
+];
+
 interface Shortcut {
   label: string;
   icon: keyof typeof ICONS;
@@ -56,38 +123,49 @@ export function buildDesktop(
 ) {
   const layer = h("div", { class: "desk-layer" });
   const overlay = h("div", { class: "app-overlay" });
-  let readme: { destroy(): void; root: HTMLElement } | null = null;
+  const openFiles = new Map<string, { destroy(): void; root: HTMLElement }>();
 
-  const openReadme = () => {
-    if (readme?.root.isConnected) {
-      readme.root.hidden = false;
+  const openTextFile = (name: string, text: string, index: number) => {
+    const existing = openFiles.get(name);
+    if (existing?.root.isConnected) {
+      existing.root.hidden = false;
       return;
     }
-    readme = openFloatingWindow(
-      layer,
-      {
-        title: "Readme.txt - Viewer",
-        className: "textview",
-        onClose: () => {
-          readme?.destroy();
-          readme = null;
-          renderTasks();
+    openFiles.set(
+      name,
+      openFloatingWindow(
+        layer,
+        {
+          title: `${name} - Viewer`,
+          className: "textview",
+          onClose: () => {
+            openFiles.get(name)?.destroy();
+            openFiles.delete(name);
+            renderTasks();
+          },
         },
-      },
-      (body) =>
-        body.append(
-          h("pre", { class: "textview-text", tabindex: "0" }, README),
-        ),
-      { x: 140, y: 40 },
+        (body) =>
+          body.append(
+            h("pre", { class: "textview-text", tabindex: "0" }, text),
+          ),
+        { x: 140 + index * 28, y: 40 + index * 28 },
+      ),
     );
     renderTasks();
   };
+  const fileOpeners = TEXT_FILES.map(
+    (f, i) => [f.name, () => openTextFile(f.name, f.text, i)] as const,
+  );
 
   const shortcuts: Shortcut[] = [
     { label: "Gaze Setup", icon: "gaze", open: () => open("calibration") },
     { label: "Watch Station", icon: "watch", open: () => open("watch") },
     { label: "Last Debrief", icon: "debrief", open: openLastDebrief },
-    { label: "Readme.txt", icon: "readme", open: openReadme },
+    ...fileOpeners.map(([label, run]) => ({
+      label,
+      icon: "readme" as const,
+      open: run,
+    })),
   ];
 
   const iconButtons = shortcuts.map((s) => {
@@ -157,7 +235,7 @@ export function buildDesktop(
         ),
       );
     }
-    if (readme) {
+    for (const [name, file] of openFiles) {
       tasks.append(
         h(
           "button",
@@ -165,11 +243,11 @@ export function buildDesktop(
             type: "button",
             class: "task-btn",
             onclick: () => {
-              if (readme) readme.root.hidden = !readme.root.hidden;
+              file.root.hidden = !file.root.hidden;
             },
           },
           icon(ICONS.readme, "task-icon"),
-          "Readme.txt",
+          name,
         ),
       );
     }
@@ -178,7 +256,7 @@ export function buildDesktop(
   const menu = h(
     "nav",
     { class: "start-menu", hidden: true, "aria-label": "Start menu" },
-    h("div", { class: "start-side", "aria-hidden": "true" }, "NIGHTWATCH 98"),
+    h("div", { class: "start-side", "aria-hidden": "true" }, "KNIGHT'S EYE 98"),
     h(
       "ul",
       null,
@@ -187,7 +265,7 @@ export function buildDesktop(
         ["Gaze Setup", () => open("calibration")],
         ["Watch Station", () => open("watch")],
         ["Last Debrief", openLastDebrief],
-        ["Readme.txt", openReadme],
+        ...fileOpeners,
         ["Main Menu", () => open("desktop")],
       ].map(([label, run]) =>
         h(
@@ -291,7 +369,7 @@ export function buildDesktop(
   };
 }
 
-/** The NIGHTWATCH main-menu window. */
+/** The KNIGHT'S EYE main-menu window. */
 export const mountMainMenu: Screen = (ctx: AppContext) => {
   let minimized = false;
   const shiftValue = h("output", {
@@ -325,11 +403,11 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
   const win = openFloatingWindow(
     ctx.layer,
     {
-      title: "NIGHTWATCH - ATTENTION TRAINING",
+      title: "KNIGHT'S EYE - ATTENTION TRAINING",
       className: "menu",
       onMinimize: () => setMinimized(true),
       onClose: () => setMinimized(true),
-      closeLabel: "Close NIGHTWATCH window",
+      closeLabel: "Close KNIGHT'S EYE window",
     },
     (body) =>
       body.append(
@@ -337,7 +415,7 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
           "div",
           { class: "menu-logo" },
           h("span", { class: "menu-eye", "aria-hidden": "true" }),
-          h("h1", { class: "pixel-title menu-title" }, "NIGHTWATCH"),
+          h("h1", { class: "pixel-title menu-title" }, "KNIGHT'S EYE"),
         ),
         h("p", { class: "menu-tagline" }, "TRAIN YOUR ATTENTION"),
         h("hr", { class: "menu-rule" }),
@@ -403,7 +481,7 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
       ),
     { x: 0, y: -24 },
   );
-  win.root.setAttribute("aria-label", "NIGHTWATCH main menu");
+  win.root.setAttribute("aria-label", "KNIGHT'S EYE main menu");
   showShift();
   begin.focus();
 
@@ -412,6 +490,6 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
     win.root.hidden = value;
     if (!value) begin.focus();
   }
-  ctx.setTask("NIGHTWATCH", () => setMinimized(!minimized));
+  ctx.setTask("KNIGHT'S EYE", () => setMinimized(!minimized));
   return () => win.destroy();
 };
