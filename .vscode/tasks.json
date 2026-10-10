@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Run Night Watch (Vite)",
+      "label": "Run Knight's Eye (Vite)",
       "type": "shell",
       "command": "npm",
       "args": ["run", "dev", "--", "--host", "127.0.0.1"],

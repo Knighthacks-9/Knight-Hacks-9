@@ -1,4 +1,4 @@
-// NIGHTWATCH desktop UI: a late-90s desktop that hosts the four screens
+// KNIGHT'S EYE desktop UI: a late-90s desktop that hosts the four screens
 // (Desktop/Main Menu → Gaze Calibration → Watch Station → Shift Debrief).
 // Screens are switched by a small state-driven controller; game state comes
 // from the NightwatchService adapter in ./service.

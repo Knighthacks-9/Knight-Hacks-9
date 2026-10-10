@@ -1,4 +1,4 @@
-// The boundary between the NIGHTWATCH desktop UI and whatever runs the game
+// The boundary between the KNIGHT'S EYE desktop UI and whatever runs the game
 // (today: the local world sim, gaze tracker, and analytics modules on the
 // event bus). Screens only talk to a NightwatchService, never to those modules
 // directly, so a remote backend can replace localService.ts without UI changes.

@@ -33,7 +33,7 @@ export class TitleScene extends Phaser.Scene {
     const shiftSeconds = loadShiftSeconds();
     this.registry.set(SHIFT_SECONDS_KEY, shiftSeconds);
 
-    addText(this, 140, "NIGHTWATCH", 64, "#f3f4f6", true);
+    addText(this, 140, "KNIGHT'S EYE", 64, "#f3f4f6", true);
     addText(this, 200, "Train your attention", 22, "#9ca3af");
     addText(
       this,
