@@ -174,6 +174,9 @@ export class CameraFeed extends Phaser.GameObjects.Container {
       const dir = facingFor(npc.facingDeg);
       const sheet = person.sprite.texture.key;
       person.sprite.setPosition(px, py).setVisible(true);
+      // Anomalies get a red tint so they stand out.
+      if (npc.suspicious) person.sprite.setTint(0xff6060);
+      else person.sprite.clearTint();
       if (npc.moving) {
         person.sprite.play(`${sheet}-walk-${dir}`, true);
       } else {
