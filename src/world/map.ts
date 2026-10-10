@@ -34,7 +34,11 @@ export const EXITS: Vec2[] = [
   { x: 39, y: 19 }, // back door, storage
 ];
 
-type CameraSpec = Omit<CameraDef, "visibleTiles">;
+// A camera sees either a cone (angle/fov/range) or, when `box` is set, a
+// fixed square of tiles (still blocked by walls).
+type CameraSpec = Omit<CameraDef, "visibleTiles"> & {
+  box?: { x: number; y: number; size: number };
+};
 
 const CAMERAS: CameraSpec[] = [
   {
@@ -53,7 +57,7 @@ const CAMERAS: CameraSpec[] = [
     y: 12,
     angleDeg: 0,
     fovDeg: 40,
-    range: 22,
+    range: 18.5,
   },
   {
     id: "cam3",
@@ -62,7 +66,7 @@ const CAMERAS: CameraSpec[] = [
     y: 12,
     angleDeg: 180,
     fovDeg: 40,
-    range: 22,
+    range: 18.5,
   },
   {
     id: "cam4",
@@ -72,6 +76,7 @@ const CAMERAS: CameraSpec[] = [
     angleDeg: 135,
     fovDeg: 90,
     range: 14,
+    box: { x: 17, y: 1, size: 9 },
   },
   {
     id: "cam5",
@@ -81,6 +86,7 @@ const CAMERAS: CameraSpec[] = [
     angleDeg: 45,
     fovDeg: 90,
     range: 16,
+    box: { x: 27, y: 1, size: 9 },
   },
   {
     id: "cam6",
@@ -90,6 +96,7 @@ const CAMERAS: CameraSpec[] = [
     angleDeg: 225,
     fovDeg: 90,
     range: 14,
+    box: { x: 30, y: 14, size: 9 },
   },
 ];
 
@@ -123,8 +130,13 @@ function computeVisible(map: WorldMap, cam: CameraSpec): number[] {
       const dx = x + 0.5 - cx;
       const dy = y + 0.5 - cy;
       const dist = Math.hypot(dx, dy);
-      if (dist > cam.range) continue;
-      if (dist > 0) {
+      const b = cam.box;
+      if (b) {
+        if (x < b.x || y < b.y || x >= b.x + b.size || y >= b.y + b.size)
+          continue;
+      } else if (dist > cam.range) {
+        continue;
+      } else if (dist > 0) {
         const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
         const diff = Math.abs(((ang - cam.angleDeg + 540) % 360) - 180);
         if (diff > half) continue;
@@ -163,9 +175,9 @@ export function buildMap(): WorldMap {
   }
   for (const d of DOORS) map.tiles[idx(map, d.x, d.y)] = "door";
   for (const e of EXITS) map.tiles[idx(map, e.x, e.y)] = "exit";
-  map.cameras = CAMERAS.map((c) => ({
+  map.cameras = CAMERAS.map(({ box, ...c }) => ({
     ...c,
-    visibleTiles: computeVisible(map, c),
+    visibleTiles: computeVisible(map, { ...c, box }),
   }));
   return map;
 }

@@ -6,6 +6,7 @@ import { gazeController } from "../vision";
 import { startWorld, type WorldHandle } from "../world";
 import { CameraFeed } from "./CameraFeed";
 import { ControlPanel } from "./ControlPanel";
+import { MinimapOverlay } from "./MinimapOverlay";
 import {
   FEED_LIMIT_KEY,
   LEVEL_KEY,
@@ -114,22 +115,18 @@ export class ShiftScene extends Phaser.Scene {
       fontFamily: "monospace",
       fontSize: "14px",
     });
-    this.add
-      .text(this.scale.width - MARGIN_X, 10, "End shift", {
-        color: "#f3f4f6",
-        fontFamily: "monospace",
-        fontSize: "14px",
-      })
-      .setOrigin(1, 0)
-      .setInteractive({ useHandCursor: true })
-      .on("pointerdown", () => {
-        playSfx("click");
-        this.endShift(false);
-      });
-    if (this.level < LEVELS.length) {
-      this.add
-        .text(this.scale.width - MARGIN_X - 100, 10, "Skip level ▸", {
-          color: "#fbbf24",
+    // Top-right buttons, laid out right to left: [Skip level ▸] [Map] [End shift]
+    const minimap = new MinimapOverlay(
+      this,
+      this.scale.width - MARGIN_X,
+      MARGIN_TOP - 4,
+      map,
+    );
+    let right = this.scale.width - MARGIN_X;
+    const topButton = (label: string, color: string, onClick: () => void) => {
+      const button = this.add
+        .text(right, 10, label, {
+          color,
           fontFamily: "monospace",
           fontSize: "14px",
         })
@@ -137,8 +134,14 @@ export class ShiftScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true })
         .on("pointerdown", () => {
           playSfx("click");
-          this.skipLevel();
+          onClick();
         });
+      right -= button.width + 20;
+    };
+    topButton("End shift", "#f3f4f6", () => this.endShift(false));
+    topButton("▣ Map", "#44ccff", () => minimap.toggle());
+    if (this.level < LEVELS.length) {
+      topButton("Skip level ▸", "#fbbf24", () => this.skipLevel());
     }
     // Shows where the eye tracker thinks the player is looking.
     this.reticle = this.add
