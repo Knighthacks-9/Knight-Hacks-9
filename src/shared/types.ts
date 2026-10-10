@@ -61,6 +61,12 @@ export interface NpcSnapshot {
   color: number;
   /** Cameras that currently see this NPC. */
   cameraIds: string[];
+  /**
+   * True while the NPC is mid suspicious behavior (between its
+   * world:suspiciousStart and world:suspiciousEnd). Feeds tint these people
+   * so anomalies are easier to spot.
+   */
+  suspicious?: boolean;
 }
 
 export interface WorldSnapshot {
