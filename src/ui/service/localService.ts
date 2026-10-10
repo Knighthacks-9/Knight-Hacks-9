@@ -199,7 +199,14 @@ export function createLocalNightwatchService(
         config.expectedAnomalies - worldEventCount(config.durationSeconds),
       );
       const from = config.durationSeconds * 0.1;
-      const to = Math.max(from + 1, config.durationSeconds - 45);
+      const to = Math.max(
+        from + 1,
+        config.durationSeconds -
+          Math.min(
+            45,
+            Math.max(config.durationSeconds - 45, config.durationSeconds * 0.3),
+          ),
+      );
       const extraSpawns = Array.from(
         { length: extra },
         (_, i) =>
