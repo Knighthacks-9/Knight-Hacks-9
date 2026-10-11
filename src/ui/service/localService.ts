@@ -189,15 +189,22 @@ export function createLocalNightwatchService(
       // synchronously, so listen before starting it.
       const onMap = (m: WorldMap) => (map = m);
       bus.on("world:map", onMap);
-      const world = startWorld({ shiftSeconds: config.durationSeconds, bus });
+      const scheduled = worldEventCount(config.durationSeconds);
+      // A count the player chose is exact; otherwise the world keeps its own.
+      const worldEvents = config.fixedAnomalies
+        ? Math.min(config.expectedAnomalies, scheduled)
+        : scheduled;
+      const world = startWorld({
+        shiftSeconds: config.durationSeconds,
+        anomalyCount: worldEvents,
+        spawnRate: config.npcSpawnRate,
+        bus,
+      });
       bus.off("world:map", onMap);
       if (!map) throw new Error("The world did not publish its map.");
       const cameras = camerasFor(map, config.cameraCount);
 
-      const extra = Math.max(
-        0,
-        config.expectedAnomalies - worldEventCount(config.durationSeconds),
-      );
+      const extra = Math.max(0, config.expectedAnomalies - worldEvents);
       const from = config.durationSeconds * 0.1;
       const to = Math.max(
         from + 1,
