@@ -26,6 +26,9 @@ jobs:
       - run: npm ci
       - run: npm run build
         env:
+          # Relative asset URLs, so one build works on both the custom domain
+          # root and knighthacks-9.github.io/Knight-Hacks-9/.
+          BASE_PATH: ./
           # The Netlify site that runs the voice/AI functions (repo Settings →
           # Secrets and variables → Actions → Variables). Unset: free mode only.
           VITE_API_BASE: ${{ vars.VITE_API_BASE }}
