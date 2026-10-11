@@ -1,16 +1,13 @@
 import Phaser from "phaser";
 import {
-  InvestigationDesk,
   dispatchText,
   playSfx,
   sayDispatch,
-  speak,
   startListening,
   stopSpeaking,
   type DispatchLineId,
   type SfxName,
   type Transmission,
-  type Whereabouts,
 } from "../audio";
 import { eventBus } from "../shared/eventBus";
 import type { Flag, SuspiciousBehavior, VoiceProvider } from "../shared/types";
@@ -42,14 +39,6 @@ export interface ControlPanelDeps {
   feedLabel(cameraId: string): string;
   /** Current shift time in seconds. */
   now(): number;
-  /** Shift length in seconds. */
-  shiftSeconds: number;
-  /** 1-based feed number and location name of a camera, e.g. 2, "Hall West". */
-  feedInfo(cameraId: string): { camera: number; location: string };
-  /** Where a person is right now, or null if they've left. */
-  locate(npcId: string): Whereabouts | null;
-  /** Ground truth: the person's suspicious behavior at shift time t, or null. */
-  suspectBehavior(npcId: string, t: number): SuspiciousBehavior | null;
 }
 
 /** Rectangle + label button with enabled / selected states. */
@@ -129,8 +118,7 @@ class PanelButton {
  * report only counts once the player radios in a description.
  *
  * Emits flag:created (a completed report) and radio:report (every
- * transmission) on the event bus. A filed report starts an investigation that
- * dispatch narrates over the radio (see InvestigationDesk).
+ * transmission) on the event bus.
  */
 export class ControlPanel {
   readonly flow = new ReportFlow();
@@ -142,7 +130,6 @@ export class ControlPanel {
   private filed: Flag[] = [];
   private radioQueue: Promise<void> = Promise.resolve();
   private destroyed = false;
-  private readonly desk: InvestigationDesk;
 
   private readonly reportTab: PanelButton;
   private readonly dispatchTab: PanelButton;
@@ -171,11 +158,6 @@ export class ControlPanel {
     height: number,
     private readonly deps: ControlPanelDeps,
   ) {
-    this.desk = new InvestigationDesk({
-      shiftSeconds: deps.shiftSeconds,
-      locate: (npcId) => deps.locate(npcId),
-      deliver: (line) => this.say(line.text),
-    });
     const left = x + PAD;
     const inner = width - 2 * PAD;
     const half = (inner - 6) / 2;
@@ -370,20 +352,6 @@ export class ControlPanel {
     });
   }
 
-  /** Queues a line written at runtime (e.g. by the AI dispatcher). */
-  say(text: string): void {
-    this.radioQueue = this.radioQueue.then(async () => {
-      if (this.destroyed) return;
-      this.addLog(`DISPATCH: ${text}`);
-      await speak(text).catch(() => undefined);
-    });
-  }
-
-  /** Advances open investigations; call every frame with the shift time. */
-  update(t: number): void {
-    this.desk.update(t);
-  }
-
   spaceDown(): void {
     if (this.talk === "idle") this.startTalk();
   }
@@ -395,7 +363,6 @@ export class ControlPanel {
   /** Stops audio and drops any open transmission (the shift is over). */
   destroy(): void {
     this.destroyed = true;
-    this.desk.destroy();
     void this.transmission?.stop();
     this.transmission = null;
     stopSpeaking();
@@ -470,24 +437,8 @@ export class ControlPanel {
       this.filed.push(flag);
       playSfx("success");
       eventBus.emit("flag:created", flag);
-      this.investigate(flag);
+      this.dispatch("unit_dispatched");
     }
-  }
-
-  /** Sends a unit. The world, not the player, decides how it turns out. */
-  private investigate(flag: Flag): void {
-    const { camera, location } = this.deps.feedInfo(flag.cameraId);
-    this.desk.start(
-      {
-        camera,
-        location,
-        reportedBehavior: flag.behavior ?? null,
-        description: flag.note ?? null,
-        suspect: this.deps.suspectBehavior(flag.npcId, flag.t),
-        npcId: flag.npcId,
-      },
-      this.deps.now(),
-    );
   }
 
   private addLog(line: string): void {

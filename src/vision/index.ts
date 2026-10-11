@@ -14,10 +14,8 @@ export {
 export type { GazeFeatures } from "./gazeFeatures";
 export {
   HEAD_TARGET,
-  averageHeadPosition,
   checkHeadAlignment,
   headGuide,
-  headPosition,
   type AlignmentIssue,
   type HeadAlignment,
   type HeadPosition,

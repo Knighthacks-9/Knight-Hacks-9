@@ -2,11 +2,9 @@
 // (today: the local world sim, gaze tracker, and analytics modules on the
 // event bus). Screens only talk to a NightwatchService, never to those modules
 // directly, so a remote backend can replace localService.ts without UI changes.
-import type { DebriefInput } from "../../audio";
 import type {
   CameraDef,
   GazeSource,
-  SuspiciousBehavior,
   Vec2,
   WorldMap,
   WorldSnapshot,
@@ -62,11 +60,6 @@ export interface ReportReceipt {
    * filed and the report doesn't count.
    */
   duplicate: boolean;
-  /**
-   * Ground truth for the dispatcher's investigation: the suspect this report
-   * matched, or null for a false report. Never shown to the player directly.
-   */
-  suspect?: { npcId: string; behavior: SuspiciousBehavior } | null;
 }
 
 export interface CalibrationSettings {
@@ -197,8 +190,6 @@ export interface ShiftResult {
   perFeedAttention: FeedAttention[];
   timeline: TimelineRow[];
   coaching: string[];
-  /** What the dispatcher's end-of-shift summary may mention. */
-  dispatcherDebrief?: DebriefInput;
 }
 
 export interface ShiftOutcome {

@@ -4,6 +4,7 @@ import {
   MAX_ANOMALIES,
   isCustomized,
   planShift,
+  presetSettings,
   sanitizeShiftSettings,
 } from "./shiftSettings";
 
@@ -26,9 +27,10 @@ describe("shift settings", () => {
     expect(isCustomized(DEFAULT_SHIFT_SETTINGS)).toBe(false);
   });
 
-  it("applies overrides", () => {
+  it("applies the player's options when Custom is on", () => {
     const settings = {
       ...DEFAULT_SHIFT_SETTINGS,
+      custom: true,
       cameraCount: 2,
       anomalies: 1,
       npcRate: "high",
@@ -49,6 +51,7 @@ describe("shift settings", () => {
     const plan = (mode: "always" | "timed" | "off") =>
       planShift(LEVEL, 120, {
         ...DEFAULT_SHIFT_SETTINGS,
+        custom: true,
         aura: mode,
         auraSeconds: 5,
       });
@@ -60,10 +63,44 @@ describe("shift settings", () => {
     expect(
       planShift(LEVEL, 120, {
         ...DEFAULT_SHIFT_SETTINGS,
+        custom: true,
         highlight: "timed",
         highlightSeconds: 8,
       }),
     ).toMatchObject({ highlight: { seconds: 8 }, aura: null });
+  });
+
+  it("locks a difficulty to its preset until Custom is chosen", () => {
+    const tweaked = {
+      ...DEFAULT_SHIFT_SETTINGS,
+      cameraCount: 2,
+      anomalies: 1,
+      distractions: "off",
+    } as const;
+    // Not custom: the tweaks are ignored and the level's preset runs.
+    const plan = planShift(LEVEL, 120, tweaked);
+    expect(plan.config.cameraCount).toBe(6);
+    expect(plan.config.expectedAnomalies).toBe(5);
+    expect(plan.config.fixedAnomalies).toBe(false);
+    expect(plan.distractionFrequency).toBe(1);
+  });
+
+  it("gives each difficulty its own preset", () => {
+    const easy = { level: 1, cameraCount: 4, expectedAnomalies: 3 } as const;
+    const hard = { level: 3, cameraCount: 6, expectedAnomalies: 8 } as const;
+    expect(presetSettings(easy)).toMatchObject({
+      cameraCount: 4,
+      anomalies: 3,
+      npcRate: "low",
+      distractions: "low",
+      glitches: false,
+    });
+    expect(presetSettings(hard)).toMatchObject({
+      npcRate: "high",
+      distractions: "high",
+      glitches: true,
+    });
+    expect(planShift(easy, 120, DEFAULT_SHIFT_SETTINGS).glitches).toBe(false);
   });
 
   it("repairs stored values", () => {

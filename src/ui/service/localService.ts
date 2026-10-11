@@ -6,7 +6,6 @@
 // backend, replace the marked call and keep the NightwatchService contract.
 import type { Emitter } from "mitt";
 import { FLAG_GRACE_SECONDS, loadHistory } from "../../analytics";
-import { debriefInput } from "../../audio";
 import { eventBus } from "../../shared/eventBus";
 import type {
   AppEvents,
@@ -38,9 +37,9 @@ import type {
 } from "./types";
 
 export const LEVELS: readonly LevelConfig[] = [
-  { level: 1, cameraCount: 4, expectedAnomalies: 3 },
-  { level: 2, cameraCount: 6, expectedAnomalies: 5 },
-  // Same six cameras as level 2 (the world has six), with more anomalies.
+  { level: 1, cameraCount: 2, expectedAnomalies: 3 },
+  { level: 2, cameraCount: 4, expectedAnomalies: 5 },
+  // Every camera the world has.
   { level: 3, cameraCount: 6, expectedAnomalies: 8 },
 ];
 
@@ -92,7 +91,6 @@ function trackerActive(): boolean {
 
 interface TrackedEvent {
   npcId: string;
-  behavior: SuspiciousBehavior;
   start: number;
   end: number | null;
   /** Last shift second each camera saw the suspect. */
@@ -271,7 +269,6 @@ export function createLocalNightwatchService(
         } else {
           events.set(event.id, {
             npcId: event.npcId,
-            behavior: event.behavior,
             start: event.t,
             end: null,
             seenOn: new Map(),
@@ -322,9 +319,6 @@ export function createLocalNightwatchService(
         reportNumber: shift.reportCount,
         cameraId: report.cameraId,
         duplicate: false,
-        suspect: event
-          ? { npcId: event.npcId, behavior: event.behavior }
-          : null,
       } satisfies ReportReceipt;
     },
 
@@ -405,7 +399,6 @@ export function createLocalNightwatchService(
         telemetry: outcome.telemetry,
         history,
       });
-      result.dispatcherDebrief = debriefInput(report, shift.cameras);
       writeJson(LAST_RESULT_KEY, result);
       return result;
     },
