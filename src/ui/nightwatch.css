@@ -317,7 +317,6 @@ body.nw {
 }
 
 /* Dark application interiors. */
-.menu .rw-body,
 .debrief .rw-body {
   margin: 2px;
   background: var(--screen);
@@ -551,13 +550,31 @@ body.nw {
   border-bottom: 1px solid #fff;
 }
 
-/* Main menu window. */
+/* Main menu window: grey chrome around a dark splash screen. */
 .menu {
   width: min(660px, calc(100% - 16px));
 }
 
 .menu .rw-body {
-  padding: 52px 36px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  color: #111;
+}
+
+.menu-splash {
+  padding: 34px 20px 28px;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.03) 0 1px,
+      transparent 1px 3px
+    ),
+    var(--screen);
+  border: 2px solid;
+  border-color: var(--lo) var(--hi) var(--hi) var(--lo);
+  color: var(--text);
   text-align: center;
 }
 
@@ -584,57 +601,79 @@ body.nw {
 }
 
 .menu-tagline {
-  margin: 22px 0 0;
+  margin: 18px 0 0;
   color: #a8b0ab;
   font-size: 24px;
   letter-spacing: 0.32em;
 }
 
-.menu-rule {
-  width: 62%;
-  height: 1px;
-  margin: 26px auto;
-  border: 0;
-  background: linear-gradient(90deg, transparent, #3a4048, transparent);
+.menu-panel .panel-body {
+  padding: 12px 16px 14px;
 }
 
 .menu-copy {
-  margin: 0;
-  color: #c9cfca;
+  margin: 0 0 12px;
+  color: #3a403b;
   font-size: 21px;
   line-height: 1.35;
+  text-align: center;
+}
+
+.menu-shift-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--lo);
+  box-shadow: inset 0 1px 0 #fff;
 }
 
 .menu-label {
-  margin: 30px 0 8px;
-  color: #8a928d;
-  font-size: 15px;
-  letter-spacing: 0.15em;
+  font-size: 22px;
 }
 
 .menu-shift {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
+  gap: 6px;
 }
 
 .menu-shift-value {
-  min-width: 70px;
-  color: var(--green-text);
-  font-size: 28px;
+  min-width: 96px;
+  margin-right: 6px;
+  padding: 2px 10px;
+  background: var(--lcd);
+  border: 2px solid;
+  border-color: #3a403b var(--hi) var(--hi) #3a403b;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.25);
+  color: var(--lcd-ink);
+  font-size: 26px;
   letter-spacing: 0.06em;
+  text-align: center;
 }
 
-.menu-begin {
-  margin-top: 22px;
-  padding: 15px 46px;
+.menu-shift .btn-sq {
+  width: 40px;
+  height: 32px;
   font-size: 11px;
 }
 
-.menu .link-btn {
-  display: block;
-  margin: 14px auto 0;
+.menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-actions .btn95 {
+  padding: 12px 18px;
+}
+
+.menu-actions .menu-begin {
+  padding: 14px 46px;
+  font-size: 11px;
 }
 
 /* Readme viewer and message boxes. */
@@ -674,7 +713,7 @@ body.nw {
 
 /* Grey window chrome with bevelled panels, like the Watch Station. */
 .calib {
-  width: min(1040px, calc(100% - 16px));
+  width: min(700px, calc(100% - 16px));
 }
 
 .calib .rw-body {
@@ -709,13 +748,14 @@ body.nw {
 
 .calib-head .pixel-title {
   margin: 0 0 6px;
-  font-size: 26px;
+  font-size: 18px;
 }
 
 .calib-sub {
   margin: 0;
   color: var(--muted);
-  font-size: 21px;
+  font-size: 20px;
+  text-wrap: balance;
 }
 
 /* Status readout: sunken LCD with a square LED. */
@@ -730,7 +770,7 @@ body.nw {
   border-color: #3a403b var(--hi) var(--hi) #3a403b;
   box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.28);
   color: var(--lcd-ink);
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: 0.06em;
 }
 
@@ -759,7 +799,7 @@ body.nw {
 
 .calib-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) 220px;
   gap: 8px;
 }
 
@@ -776,7 +816,8 @@ body.nw {
 
 .calib-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 84px 132px;
+  grid-template-columns: 150px 84px 100px;
+  justify-content: start;
   align-items: center;
   gap: 12px;
   min-height: 48px;
@@ -859,6 +900,7 @@ body.nw {
 .calib-monitor .calib-small {
   color: var(--green-text);
   text-align: left;
+  text-wrap: balance;
 }
 
 .calib-camera .btn95 {
@@ -877,6 +919,7 @@ body.nw {
   color: #3a403b;
   font-size: 19px;
   text-align: center;
+  text-wrap: balance;
 }
 
 .calib-actions {
@@ -2821,9 +2864,13 @@ body.nw {
     display: none;
   }
 
-  .debrief .rw-body,
-  .menu .rw-body {
+  .debrief .rw-body {
     padding: 20px 14px;
+  }
+
+  .menu-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
   }
 
   .calib-logo {

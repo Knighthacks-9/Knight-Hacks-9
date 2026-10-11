@@ -434,70 +434,97 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
       body.append(
         h(
           "div",
-          { class: "menu-logo" },
-          h("span", { class: "menu-eye", "aria-hidden": "true" }),
-          h("h1", { class: "pixel-title menu-title" }, "KNIGHT'S EYE"),
-        ),
-        h("p", { class: "menu-tagline" }, "TRAIN YOUR ATTENTION"),
-        h("hr", { class: "menu-rule" }),
-        h(
-          "p",
-          { class: "menu-copy" },
-          "Monitor the camera feeds through the night.",
-          h("br"),
-          "Report suspicious activity to dispatch without losing focus.",
+          { class: "menu-splash" },
+          h(
+            "div",
+            { class: "menu-logo" },
+            h("span", { class: "menu-eye", "aria-hidden": "true" }),
+            h("h1", { class: "pixel-title menu-title" }, "KNIGHT'S EYE"),
+          ),
+          h("p", { class: "menu-tagline" }, "TRAIN YOUR ATTENTION"),
         ),
         h(
-          "p",
-          { class: "menu-label", id: "shift-length-label" },
-          "SHIFT LENGTH",
+          "section",
+          { class: "panel menu-panel" },
+          h("div", { class: "panel-title" }, h("h3", null, "SHIFT ORDERS")),
+          h(
+            "div",
+            { class: "panel-body" },
+            h(
+              "p",
+              { class: "menu-copy" },
+              "Monitor the camera feeds through the night.",
+              h("br"),
+              "Report suspicious activity to dispatch without losing focus.",
+            ),
+            h(
+              "div",
+              { class: "menu-shift-row" },
+              h(
+                "span",
+                { class: "menu-label", id: "shift-length-label" },
+                "Shift length",
+              ),
+              h(
+                "div",
+                {
+                  class: "menu-shift",
+                  role: "group",
+                  "aria-labelledby": "shift-length-label",
+                },
+                shiftValue,
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "btn95 btn-sq",
+                    "aria-label": "Shorter shift",
+                    onclick: () => stepShift(-1),
+                  },
+                  "-",
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "btn95 btn-sq",
+                    "aria-label": "Longer shift",
+                    onclick: () => stepShift(1),
+                  },
+                  "+",
+                ),
+              ),
+            ),
+            h(
+              "p",
+              { class: "sr-only" },
+              `Between ${mmss(MIN_SHIFT_SECONDS)} and ${mmss(MAX_SHIFT_SECONDS)}.`,
+            ),
+          ),
         ),
         h(
           "div",
-          {
-            class: "menu-shift",
-            role: "group",
-            "aria-labelledby": "shift-length-label",
-          },
+          { class: "menu-actions" },
           h(
             "button",
             {
               type: "button",
-              class: "btn95 btn-sq",
-              "aria-label": "Shorter shift",
-              onclick: () => stepShift(-1),
+              class: "btn95",
+              onclick: () => {
+                playSfx("click");
+                ctx.go("watch");
+              },
             },
-            "-",
+            "SKIP CALIBRATION",
           ),
-          shiftValue,
-          h(
-            "button",
-            {
-              type: "button",
-              class: "btn95 btn-sq",
-              "aria-label": "Longer shift",
-              onclick: () => stepShift(1),
-            },
-            "+",
-          ),
+          begin,
         ),
         h(
-          "p",
-          { class: "sr-only" },
-          `Between ${mmss(MIN_SHIFT_SECONDS)} and ${mmss(MAX_SHIFT_SECONDS)}.`,
-        ),
-        begin,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "link-btn",
-            onclick: () => {
-              playSfx("click");
-              ctx.go("watch");
-            },
-          },
-          "Skip calibration",
+          "div",
+          { class: "ws-statusbar" },
+          h("i", { class: "status-led", "aria-hidden": "true" }),
+          "SYSTEM READY",
+          h("span", { class: "ws-version" }, "v1.04"),
         ),
       ),
     { x: 0, y: -24 },
