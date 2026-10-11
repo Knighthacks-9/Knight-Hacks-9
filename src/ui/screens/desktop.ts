@@ -38,8 +38,6 @@ const README = [
   "",
   "5. DEBRIEF",
   "   END SHIFT / DEBRIEF shows where your attention went.",
-  "",
-  "Classic version: add ?ui=classic to the address.",
 ].join("\n");
 
 const ATTRIBUTIONS = [
@@ -292,17 +290,6 @@ export function buildDesktop(
       startItem("Last Debrief", "chart", openLastDebrief),
       ...fileOpeners.map(([label, run]) => startItem(label, "note", run)),
       startItem("Main Menu", "window", () => open("desktop")),
-      h("li", { class: "start-sep", role: "separator" }),
-      h(
-        "li",
-        null,
-        h(
-          "a",
-          { class: "start-item", href: "?ui=classic" },
-          icon(ICONS.crt, "start-icon"),
-          "Classic Mode...",
-        ),
-      ),
       h("li", { class: "start-sep", role: "separator" }),
       startItem("Restart", "restart", () => power("restart")),
       startItem("Shut Down", "power", () => power("shutdown")),

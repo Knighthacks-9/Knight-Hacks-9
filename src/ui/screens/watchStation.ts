@@ -399,6 +399,20 @@ export const mountWatchStation: Screen = (ctx, params) => {
       source,
       transcript,
     };
+    let receipt;
+    try {
+      receipt = await service.submitReport(session.shiftId, report);
+    } catch (error) {
+      console.error("Report failed.", error);
+      setStatus("REPORT FAILED · CHECK CONNECTION");
+      return;
+    }
+    if (receipt.duplicate) {
+      // Same anomaly reported again: it doesn't count.
+      playSfx("deny");
+      setStatus(`ALREADY REPORTED · ${view.feed.label}`);
+      return;
+    }
     telemetry.reports.push(report);
     updateReportPanel();
     playSfx("send");
@@ -407,13 +421,6 @@ export const mountWatchStation: Screen = (ctx, params) => {
     view.root.classList.add("is-reported");
     window.setTimeout(() => view.root.classList.remove("is-reported"), 1800);
     setStatus(`REPORT SENT · ${view.feed.label}`);
-    try {
-      await service.submitReport(session.shiftId, report);
-    } catch (error) {
-      console.error("Report failed.", error);
-      setStatus("REPORT FAILED · CHECK CONNECTION");
-      return;
-    }
     const n = view.index + 1;
     const text = ACKS[Math.floor(Math.random() * ACKS.length)](n);
     radio.receive({
