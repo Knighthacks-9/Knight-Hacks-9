@@ -355,6 +355,7 @@ export function openShiftSetup(ctx: AppContext): void {
   const refresh = () => refreshers.forEach((run) => run());
   const close = () => {
     ctx.root.removeEventListener(SHIFT_SETTINGS_EVENT, refresh);
+    removeTask();
     win.destroy();
     openWindow = null;
   };
@@ -403,6 +404,7 @@ export function openShiftSetup(ctx: AppContext): void {
     { x: 40, y: 10 },
   );
   openWindow = win;
+  const removeTask = ctx.addTask("SHIFT_SETUP.CFG", win.root);
   // Also follows changes made elsewhere (the main menu's shift length).
   ctx.root.addEventListener(SHIFT_SETTINGS_EVENT, refresh);
   refresh();

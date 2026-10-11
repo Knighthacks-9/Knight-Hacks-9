@@ -3380,3 +3380,94 @@ body.nw {
   font-size: 17px;
   text-align: center;
 }
+
+/* ------------------------------------------------- taskbar switching --- */
+
+/* Windows behind the one in front get a grey title bar. */
+.rw.is-inactive > .rw-titlebar {
+  background: linear-gradient(90deg, #5f665f, #979e96);
+  color: #d9ddd6;
+}
+
+.task-btn {
+  transition: background-color 0.08s;
+}
+
+.task-btn:hover:not(.is-active) {
+  background-color: #cfd5cc;
+}
+
+.task-btn:active {
+  border-color: var(--shadow) var(--hi) var(--hi) var(--shadow);
+  box-shadow:
+    inset 1px 1px 0 var(--lo),
+    inset -1px -1px 0 #fff;
+  padding-top: 2px;
+}
+
+.task-btn.is-active {
+  font-weight: bold;
+  padding-top: 1px;
+}
+
+.task-btn.is-minimized {
+  color: #4b524b;
+}
+
+.task-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-btn.is-new {
+  animation: task-pop 0.24s steps(4);
+}
+
+.rw.is-restoring {
+  animation: rw-restore 0.18s steps(5) both;
+}
+
+.rw.is-minimizing {
+  animation: rw-minimize 0.13s steps(4) both;
+  pointer-events: none;
+}
+
+.rw.is-raised > .rw-titlebar {
+  animation: rw-raise 0.22s steps(2);
+}
+
+@keyframes task-pop {
+  from {
+    width: 40px;
+    opacity: 0.4;
+  }
+}
+
+@keyframes rw-restore {
+  from {
+    opacity: 0.2;
+    transform: translateY(48px) scale(0.86);
+  }
+}
+
+@keyframes rw-minimize {
+  to {
+    opacity: 0;
+    transform: translateY(64px) scale(0.72);
+  }
+}
+
+@keyframes rw-raise {
+  50% {
+    filter: brightness(1.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-btn.is-new,
+  .rw.is-restoring,
+  .rw.is-minimizing,
+  .rw.is-raised > .rw-titlebar {
+    animation: none;
+  }
+}

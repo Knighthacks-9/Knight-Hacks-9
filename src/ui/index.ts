@@ -98,6 +98,7 @@ export function startNightwatchUi(root: HTMLElement): void {
       }
     },
     setTask: desktop.setTask,
+    addTask: desktop.addTask,
   };
 
   /** Closes whatever is running, then boots back to the desktop. */
