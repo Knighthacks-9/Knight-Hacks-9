@@ -90,7 +90,7 @@ const CREDITS = [
   "   https://www.linkedin.com/in/dev-shill-0a4ba4440/",
   "   Contributions:",
   "    - World & AI Gameplay",
-  "    - Character Sprite Sourcing",
+  "    - NPC Sprites",
   "    - Mini Map",
   "",
   "Sanjana Metla",
