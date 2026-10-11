@@ -1,5 +1,5 @@
 // Screen 3: WATCH_STATION.EXE, the maximized shift window. Camera workspace
-// on the left (4 or 6 feeds, focus mode, report mode, pop-ups, glitches);
+// on the left (2 to 6 feeds, focus mode, report mode, pop-ups, glitches);
 // side console on the right (report control, dispatch radio, end shift).
 import {
   InvestigationDesk,
@@ -17,7 +17,6 @@ import type { Screen } from "../context";
 import { h, icon, mmss, pad2 } from "../dom";
 import { ICONS } from "../icons";
 import {
-  LEVELS,
   levelConfig,
   type AnomalyReport,
   type CameraFeed,
@@ -25,6 +24,7 @@ import {
   type ShiftSession,
   type ShiftTelemetry,
 } from "../service";
+import { planShift } from "../shiftSettings";
 import { DistractionManager } from "../watch/distractions";
 import { FeedRenderer } from "../watch/feedRenderer";
 import { GlitchScheduler } from "../watch/glitch";
@@ -59,10 +59,9 @@ export const mountWatchStation: Screen = (ctx, params) => {
   const { service } = ctx;
   const level = levelConfig(params.level ?? ctx.state.level);
   ctx.state.level = level.level;
-  const config: ShiftConfig = {
-    ...level,
-    durationSeconds: ctx.state.shiftSeconds,
-  };
+  // The level plus whatever the player changed in Shift Setup.
+  const plan = planShift(level, ctx.state.shiftSeconds, ctx.state.settings);
+  const config: ShiftConfig = plan.config;
 
   let session: ShiftSession | null = null;
   let disposed = false;
@@ -101,28 +100,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   win.root.setAttribute("aria-label", "Watch Station");
 
   // --- Camera workspace -------------------------------------------------------
-  const tabs = h(
-    "div",
-    { class: "ws-tabs", role: "tablist", "aria-label": "Shift level" },
-    ...LEVELS.map((l) =>
-      h(
-        "button",
-        {
-          type: "button",
-          role: "tab",
-          class: "ws-tab",
-          "aria-selected": String(l.level === level.level),
-          title: `${l.cameraCount} cameras · ${l.expectedAnomalies} expected anomalies. Switching restarts the shift.`,
-          onclick: () => {
-            if (l.level === level.level) return;
-            playSfx("click");
-            ctx.go("watch", { level: l.level });
-          },
-        },
-        `LEVEL_${l.level}`,
-      ),
-    ),
-  );
+  // Difficulty is picked in shift setup, so the toolbar only has the map.
   const online = h("span", { class: "ws-online" }, "CONNECTING...");
   const restoreButton = h(
     "button",
@@ -166,7 +144,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
     h(
       "div",
       { class: "ws-toolbar" },
-      h("div", { class: "ws-toolbar-left" }, tabs, minimap.button),
+      h("div", { class: "ws-toolbar-left" }, minimap.button),
       h("div", { class: "ws-toolbar-right" }, restoreButton, online),
     ),
     banner,
@@ -302,7 +280,10 @@ export const mountWatchStation: Screen = (ctx, params) => {
   updateTimer(0);
   updateReportPanel();
 
-  const distractions = new DistractionManager(popups);
+  const distractions = new DistractionManager(
+    popups,
+    plan.distractionFrequency,
+  );
   const glitches = new GlitchScheduler(() =>
     views.map((v) => ({
       element: v.root,
@@ -523,7 +504,14 @@ export const mountWatchStation: Screen = (ctx, params) => {
         root,
         rec,
         focusButton,
-        renderer: new FeedRenderer(canvas, feed, s.map, config.level),
+        renderer: new FeedRenderer(
+          canvas,
+          feed,
+          s.map,
+          config.level,
+          plan.highlight,
+          plan.aura,
+        ),
       };
       focusButton.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -607,7 +595,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
       reticle.style.transform = `translate(${gx - box.left}px, ${gy - box.top}px)`;
 
     distractions.update(t, onPopup);
-    glitches.update(t);
+    if (plan.glitches) glitches.update(t);
     updateTimer(t);
     if (t >= config.durationSeconds) void finish(true);
   }
