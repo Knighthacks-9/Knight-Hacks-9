@@ -8,7 +8,6 @@ import type { Screen } from "../context";
 import { h, icon, mmss, pad2 } from "../dom";
 import { ICONS } from "../icons";
 import {
-  LEVELS,
   levelConfig,
   type AnomalyReport,
   type CameraFeed,
@@ -90,28 +89,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   win.root.setAttribute("aria-label", "Watch Station");
 
   // --- Camera workspace -------------------------------------------------------
-  const tabs = h(
-    "div",
-    { class: "ws-tabs", role: "tablist", "aria-label": "Shift level" },
-    ...LEVELS.map((l) =>
-      h(
-        "button",
-        {
-          type: "button",
-          role: "tab",
-          class: "ws-tab",
-          "aria-selected": String(l.level === level.level),
-          title: `${l.cameraCount} cameras · ${l.expectedAnomalies} expected anomalies. Switching restarts the shift.`,
-          onclick: () => {
-            if (l.level === level.level) return;
-            playSfx("click");
-            ctx.go("watch", { level: l.level });
-          },
-        },
-        `LEVEL_${l.level}`,
-      ),
-    ),
-  );
+  // Difficulty is picked in shift setup, so the toolbar only has the map.
   const online = h("span", { class: "ws-online" }, "CONNECTING...");
   const restoreButton = h(
     "button",
@@ -155,7 +133,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
     h(
       "div",
       { class: "ws-toolbar" },
-      h("div", { class: "ws-toolbar-left" }, tabs, minimap.button),
+      h("div", { class: "ws-toolbar-left" }, minimap.button),
       h("div", { class: "ws-toolbar-right" }, restoreButton, online),
     ),
     banner,
