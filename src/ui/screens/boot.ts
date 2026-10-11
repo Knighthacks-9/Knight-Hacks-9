@@ -271,15 +271,20 @@ export function runBootSequence(root: HTMLElement): Promise<void> {
 const SHUTDOWN_MS = 1800;
 
 /**
- * Shuts the machine down: a closing message, then a dark screen with a power
- * button. Resolves when the player presses the button to turn it back on.
+ * The machine is off: a dark screen with a power button. Resolves when the
+ * player presses the button to turn it on. With `shuttingDown`, a closing
+ * message shows first (Start menu > Shut Down); without it the button is
+ * there at once (the game's first screen).
  */
-export function runShutdown(root: HTMLElement): Promise<void> {
+export function runPowerOff(
+  root: HTMLElement,
+  shuttingDown = false,
+): Promise<void> {
   return new Promise((resolve) => {
     const message = h(
       "p",
       { class: "power-message", role: "status" },
-      "NIGHTWATCH 98 is shutting down ...",
+      "KNIGHT'S EYE 98 is shutting down ...",
     );
     const button = h(
       "button",
@@ -306,15 +311,13 @@ export function runShutdown(root: HTMLElement): Promise<void> {
       hint,
     );
     root.append(screen);
+    const showButton = () => {
+      message.hidden = true;
+      button.hidden = hint.hidden = false;
+      button.focus();
+    };
+    if (!shuttingDown || prefersReducedMotion()) return showButton();
     playSfx("cancel");
-
-    window.setTimeout(
-      () => {
-        message.hidden = true;
-        button.hidden = hint.hidden = false;
-        button.focus();
-      },
-      prefersReducedMotion() ? 0 : SHUTDOWN_MS,
-    );
+    window.setTimeout(showButton, SHUTDOWN_MS);
   });
 }

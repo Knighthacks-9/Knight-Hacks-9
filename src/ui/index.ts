@@ -7,7 +7,7 @@ import { loadShiftSeconds } from "../game/levels";
 import { attachMouseFallback, gazeController, loadGazeModel } from "../vision";
 import type { AppContext, Screen, ScreenName, ScreenParams } from "./context";
 import { h } from "./dom";
-import { runBootSequence, runShutdown } from "./screens/boot";
+import { runBootSequence, runPowerOff } from "./screens/boot";
 import { mountCalibration } from "./screens/calibration";
 import { mountDebrief } from "./screens/debrief";
 import { buildDesktop, mountMainMenu, type PowerMode } from "./screens/desktop";
@@ -110,7 +110,7 @@ export function startNightwatchUi(root: HTMLElement): void {
     desktop.reset();
     desktop.layer.replaceChildren();
     delete root.dataset.screen;
-    if (mode === "shutdown") await runShutdown(root);
+    if (mode === "shutdown") await runPowerOff(root, true);
     await runBootSequence(root);
     ctx.go("desktop");
   }
@@ -158,7 +158,12 @@ export function startNightwatchUi(root: HTMLElement): void {
   const start = query.get("screen") as ScreenName | null;
   if (start === "debrief") void openLastDebrief();
   else if (start && start in SCREENS) ctx.go(start);
-  // The boot intro teaches the game; ?boot=0 skips it.
+  // The machine starts switched off: the power button, then the boot intro
+  // that teaches the game. ?boot=0 skips both.
   else if (query.get("boot") === "0") ctx.go("desktop");
-  else void runBootSequence(root).then(() => ctx.go("desktop"));
+  else {
+    void runPowerOff(root)
+      .then(() => runBootSequence(root))
+      .then(() => ctx.go("desktop"));
+  }
 }
