@@ -266,7 +266,7 @@ export function runShutdown(root: HTMLElement): Promise<void> {
     const message = h(
       "p",
       { class: "power-message", role: "status" },
-      "NIGHTWATCH 98 is shutting down ...",
+      "KNIGHT'S EYE 98 is shutting down ...",
     );
     const button = h(
       "button",
