@@ -16,6 +16,7 @@ import {
   checkHeadAlignment,
   headGuide,
   type HeadAlignment,
+  type HeadPosition,
 } from "./headAlignment";
 import "./cameraPreview.css";
 
@@ -231,6 +232,8 @@ export class MediaPipeGazeTracker {
   private lastBrightness = 1;
   private blinkDetector = new BlinkDetector();
   private alignment: HeadAlignment = NOT_ALIGNED;
+  /** The calibrated head position the preview's guide is drawn at. */
+  private guideHead: HeadPosition | null = null;
   private previewVisible = true;
   /** The player's choice to hide the preview, kept across sessions. */
   private previewHidden = readPreviewHidden();
@@ -626,7 +629,12 @@ export class MediaPipeGazeTracker {
               this.video.videoWidth,
               this.video.videoHeight,
             );
-        this.setAlignment(checkHeadAlignment(features, this.alignment.aligned));
+        // Once calibrated, keep the face near where it was calibrated.
+        const anchor = gazeController.getModel()?.head ?? null;
+        this.setAlignment(
+          checkHeadAlignment(features, this.alignment.aligned, anchor),
+        );
+        if (anchor !== this.guideHead) this.drawGuide();
         this.drawOverlay(face, detectorBox);
         gazeController.setTrackerFeatures(features);
 
@@ -691,19 +699,29 @@ export class MediaPipeGazeTracker {
     return svg;
   }
 
-  /** Sizes the head guide to the camera frame once its resolution is known. */
+  /**
+   * Sizes the overlay to the camera frame and draws the head guide where the
+   * head sat during calibration. Before calibrating there is no guide: the
+   * face only needs to be in view, at any distance.
+   */
   private drawGuide(): void {
     const width = this.video?.videoWidth ?? 0;
     const height = this.video?.videoHeight ?? 0;
     if (!this.overlay || !width || !height) return;
     this.overlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    const { cx, cy, rx, ry, eyeY } = headGuide(width, height);
+    const head = gazeController.getModel()?.head ?? null;
+    this.guideHead = head;
     const guide = this.overlay.querySelector("[data-guide]");
+    const eyes = this.overlay.querySelector("[data-guide-eyes]");
+    for (const element of [guide, eyes]) {
+      element?.setAttribute("visibility", head ? "visible" : "hidden");
+    }
+    if (!head) return;
+    const { cx, cy, rx, ry, eyeY } = headGuide(width, height, head);
     guide?.setAttribute("cx", String(cx));
     guide?.setAttribute("cy", String(cy));
     guide?.setAttribute("rx", String(rx));
     guide?.setAttribute("ry", String(ry));
-    const eyes = this.overlay.querySelector("[data-guide-eyes]");
     eyes?.setAttribute("x1", String(cx - rx * 0.75));
     eyes?.setAttribute("x2", String(cx + rx * 0.75));
     eyes?.setAttribute("y1", String(eyeY));

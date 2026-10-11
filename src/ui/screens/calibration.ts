@@ -6,11 +6,13 @@
 // player clicks each target, which measures pointer accuracy only.
 import { playSfx } from "../../audio";
 import {
+  averageHeadPosition,
   checkHeadAlignment,
   clearGazeCorrection,
   fitGazeModel,
   gazeController,
   headGuide,
+  headPosition,
   mediaPipeGazeTracker,
   predictUncorrectedGaze,
   refineGazeModel,
@@ -18,6 +20,7 @@ import {
   validationErrorPx,
   type CalibrationSample,
   type GazePoint,
+  type HeadPosition,
   type TrackerPhase,
 } from "../../vision";
 import type { AppContext, Screen } from "../context";
@@ -50,7 +53,11 @@ const SWEEPS: (GazePoint & { name: string })[] = [
   { x: 0.25, y: 0.62, name: "Sweep left" },
   { x: 0.75, y: 0.62, name: "Sweep right" },
 ];
-/** How long the face must stay in view before calibration starts by itself. */
+/**
+ * How long the face must stay in view before calibration starts by itself.
+ * Where it sat meanwhile, at whatever distance, is locked in as the spot to
+ * keep the face near.
+ */
 const ALIGN_HOLD_MS = 1500;
 const INTRO_MS = 1800;
 const SWEEP_INTRO_MS = 3200;
@@ -695,8 +702,10 @@ function runCalibration(
     };
   }
 
-  // Webcam: first the player gets their face in view (calibration starts by
-  // itself once they hold still, or at once with SPACE). Each point then
+  // Webcam: first the player gets their face in view at whatever distance
+  // suits their device (calibration starts by itself once they hold still,
+  // or at once with SPACE). That position is locked in, and the face must
+  // stay near it from then on. Each point then
   // glides in, settles, and records about a second of frames. Last, a head
   // sweep: eyes stay on a dot while the head turns and nods, which teaches
   // the model how this player's eyes and head share the work, so gaze keeps
@@ -709,6 +718,9 @@ function runCalibration(
     "align";
   let phaseStart = performance.now();
   let alignedSince: number | null = null;
+  /** Head positions while held in view, averaged into the locked position. */
+  let holding: HeadPosition[] = [];
+  let locked: HeadPosition | null = null;
   let framed = false;
   let pointSamples = 0;
   let lastFrame = -1;
@@ -721,7 +733,10 @@ function runCalibration(
   });
   overlay.insertBefore(sweepHint, cancel);
   const begin = (now: number): boolean => {
-    if (phase !== "align" || !gazeController.getTrackerFeatures()) return false;
+    const current = headPosition(gazeController.getTrackerFeatures());
+    if (phase !== "align" || !current) return false;
+    locked = averageHeadPosition(holding) ?? current;
+    framed = true;
     playSfx("capture");
     align.release();
     align.panel.remove();
@@ -771,20 +786,24 @@ function runCalibration(
     const elapsed = now - phaseStart;
     const goal = steps[index];
     const features = gazeController.getTrackerFeatures();
-    // Only "is the face in view" matters now; the model handles movement.
-    const framing = checkHeadAlignment(features, framed);
+    // Only "is the face in view" matters now, near the locked position once
+    // there is one; the model handles movement within that.
+    const framing = checkHeadAlignment(features, framed, locked);
     framed = framing.aligned;
 
     if (phase === "align") {
       const tracking = mediaPipeGazeTracker.getStatus().phase;
       const ready = tracking === "running" && framed;
       alignedSince = ready ? (alignedSince ?? now) : null;
+      const head = ready ? headPosition(features) : null;
+      if (head) holding.push(head);
+      else holding = [];
       const held =
         alignedSince === null
           ? 0
           : Math.min((now - alignedSince) / ALIGN_HOLD_MS, 1);
       align.update(
-        features,
+        headPosition(features),
         ready,
         held,
         ready
@@ -928,8 +947,8 @@ function runCalibration(
 }
 
 // ---------------------------------------------------------------------------
-// Head alignment monitor: a large mirrored camera view with the head guide and
-// a marker for where the player's eyes are now.
+// Head alignment monitor: a large mirrored camera view with an outline that
+// follows the player's face, sized to however far they sit from the camera.
 // ---------------------------------------------------------------------------
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -954,10 +973,8 @@ function createAlignMonitor(onLock: () => void) {
   overlay.setAttribute("aria-hidden", "true");
   const guide = svg("ellipse", "calib-align-guide");
   const eyeLine = svg("line", "calib-align-eyes");
-  const trail = svg("line", "calib-align-trail");
   const marker = svg("circle", "calib-align-marker");
-  marker.setAttribute("r", "12");
-  overlay.append(guide, eyeLine, trail, marker);
+  overlay.append(guide, eyeLine, marker);
 
   const monitor = h("div", { class: "calib-align-monitor" }, video, overlay);
   const hint = h("p", {
@@ -977,7 +994,7 @@ function createAlignMonitor(onLock: () => void) {
     h(
       "p",
       { class: "calib-sub" },
-      "Sit the way you will play, facing the screen. The outline is only a guide: calibration starts once your face is in view and still. You can move your head naturally afterwards.",
+      "Sit or hold your device the way you will play, facing the screen, at any comfortable distance. Calibration starts once your whole face is in view and still, and locks in that spot. Small head movements are fine afterwards.",
     ),
     monitor,
     hint,
@@ -996,19 +1013,11 @@ function createAlignMonitor(onLock: () => void) {
   const settings = stream?.getVideoTracks()[0]?.getSettings();
   let width = settings?.width ?? 1280;
   let height = settings?.height ?? 720;
-  let target = headGuide(width, height);
   const layout = () => {
-    target = headGuide(width, height);
     monitor.style.aspectRatio = `${width} / ${height}`;
+    // Portrait phone cameras need a narrower view to fit the screen height.
+    monitor.style.setProperty("--frame-ratio", String(width / height));
     overlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    guide.setAttribute("cx", String(target.cx));
-    guide.setAttribute("cy", String(target.cy));
-    guide.setAttribute("rx", String(target.rx));
-    guide.setAttribute("ry", String(target.ry));
-    eyeLine.setAttribute("x1", String(target.cx - target.rx * 0.75));
-    eyeLine.setAttribute("x2", String(target.cx + target.rx * 0.75));
-    eyeLine.setAttribute("y1", String(target.eyeY));
-    eyeLine.setAttribute("y2", String(target.eyeY));
   };
   video.addEventListener("loadedmetadata", () => {
     if (!video.videoWidth || !video.videoHeight) return;
@@ -1021,7 +1030,7 @@ function createAlignMonitor(onLock: () => void) {
   return {
     panel,
     update(
-      features: { faceX: number; faceY: number } | null,
+      head: HeadPosition | null,
       aligned: boolean,
       held: number,
       text: string,
@@ -1030,18 +1039,20 @@ function createAlignMonitor(onLock: () => void) {
       hint.dataset.tone = aligned ? "ok" : "warn";
       if (hint.textContent !== text) hint.textContent = text;
       meter.style.setProperty("--hold", held.toFixed(2));
-      const shown = features !== null;
-      marker.setAttribute("visibility", shown ? "visible" : "hidden");
-      trail.setAttribute("visibility", shown ? "visible" : "hidden");
-      if (!features) return;
-      const x = String(features.faceX * width);
-      const y = String(features.faceY * height);
-      marker.setAttribute("cx", x);
-      marker.setAttribute("cy", y);
-      trail.setAttribute("x1", x);
-      trail.setAttribute("y1", y);
-      trail.setAttribute("x2", String(target.cx));
-      trail.setAttribute("y2", String(target.eyeY));
+      overlay.setAttribute("visibility", head ? "visible" : "hidden");
+      if (!head) return;
+      const face = headGuide(width, height, head);
+      guide.setAttribute("cx", String(face.cx));
+      guide.setAttribute("cy", String(face.cy));
+      guide.setAttribute("rx", String(face.rx));
+      guide.setAttribute("ry", String(face.ry));
+      eyeLine.setAttribute("x1", String(face.cx - face.rx * 0.75));
+      eyeLine.setAttribute("x2", String(face.cx + face.rx * 0.75));
+      eyeLine.setAttribute("y1", String(face.eyeY));
+      eyeLine.setAttribute("y2", String(face.eyeY));
+      marker.setAttribute("cx", String(face.cx));
+      marker.setAttribute("cy", String(face.eyeY));
+      marker.setAttribute("r", String(face.rx * 0.12));
     },
     release(): void {
       video.pause();

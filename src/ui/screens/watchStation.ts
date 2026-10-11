@@ -1,8 +1,17 @@
 // Screen 3: WATCH_STATION.EXE, the maximized shift window. Camera workspace
 // on the left (2 to 6 feeds, focus mode, report mode, pop-ups, glitches);
 // side console on the right (report control, dispatch radio, end shift).
-import { dispatchText, playSfx, sayDispatch, speak } from "../../audio";
+import {
+  InvestigationDesk,
+  dispatchText,
+  locateNpc,
+  playSfx,
+  sayDispatch,
+  speak,
+  type InvestigationLine,
+} from "../../audio";
 import { eventBus } from "../../shared/eventBus";
+import type { WorldSnapshot } from "../../shared/types";
 import { gazeController } from "../../vision";
 import type { Screen } from "../context";
 import { h, icon, mmss, pad2 } from "../dom";
@@ -27,14 +36,15 @@ import { createWindow } from "../window";
 /** Longest frame step fed to the sim, so a backgrounded tab doesn't jump ahead. */
 const MAX_DT = 0.1;
 
-const ACKS = [
-  (n: number) =>
-    `Control to observer. Report on camera ${n} received. Keep watching that sector and advise of further changes.`,
-  (n: number) =>
-    `Copy, observer. Sighting on camera ${n} logged. A unit is being notified. Stay on your feeds.`,
-  (n: number) =>
-    `Control to observer. Camera ${n} report acknowledged. Advise if the subject moves.`,
-];
+/** LCD headline prefix for each investigation stage. */
+const STAGE_HEADLINES: Record<InvestigationLine["stage"], string> = {
+  acknowledged: "ACK",
+  en_route: "EN ROUTE",
+  on_scene: "ON SCENE",
+  resolved: "RESOLVED",
+  closed: "CLOSED",
+  late: "LOGGED",
+};
 
 interface FeedView {
   feed: CameraFeed;
@@ -58,6 +68,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   let finished = false;
   let raf = 0;
   let shiftT = 0;
+  let lastSnapshot: WorldSnapshot | null = null;
   let shownSecond = -1;
   let reportMode = false;
   let focused: FeedView | null = null;
@@ -205,6 +216,30 @@ export const mountWatchStation: Screen = (ctx, params) => {
     },
   });
   const radioPanel = panel("AI DISPATCH RADIO", null, radio.root);
+
+  // Each filed report is investigated over the radio; the world decides the
+  // outcome, the AI dispatcher only words it.
+  const desk = new InvestigationDesk({
+    shiftSeconds: config.durationSeconds,
+    locate: (npcId) =>
+      locateNpc(
+        lastSnapshot,
+        session?.map ?? null,
+        views.map((v) => ({ id: v.feed.id, location: v.feed.location })),
+        npcId,
+      ),
+    deliver: (line) => {
+      const label = views[line.camera - 1]?.feed.label ?? `CAM ${line.camera}`;
+      radio.receive(
+        {
+          headline: `${STAGE_HEADLINES[line.stage]}: ${label}`,
+          text: line.text,
+          play: () => speak(line.text),
+        } satisfies RadioMessage,
+        0,
+      );
+    },
+  });
 
   const statusText = h("span", null, "CONNECTING...");
   const endButton = h(
@@ -396,13 +431,17 @@ export const mountWatchStation: Screen = (ctx, params) => {
     view.root.classList.add("is-reported");
     window.setTimeout(() => view.root.classList.remove("is-reported"), 1800);
     setStatus(`REPORT SENT · ${view.feed.label}`);
-    const n = view.index + 1;
-    const text = ACKS[Math.floor(Math.random() * ACKS.length)](n);
-    radio.receive({
-      headline: `RE: ${view.feed.label}`,
-      text,
-      play: () => speak(text),
-    } satisfies RadioMessage);
+    desk.start(
+      {
+        camera: view.index + 1,
+        location: view.feed.location,
+        reportedBehavior: null,
+        description: transcript ?? null,
+        suspect: receipt.suspect?.behavior ?? null,
+        npcId: receipt.suspect?.npcId ?? null,
+      },
+      shiftT,
+    );
   }
 
   function buildFeeds(s: ShiftSession): void {
@@ -515,6 +554,8 @@ export const mountWatchStation: Screen = (ctx, params) => {
     last = now;
     const { t, snapshot } = session.tick(dt);
     shiftT = t;
+    lastSnapshot = snapshot;
+    desk.update(t);
 
     const source = gazeController.getSource(now);
     const point = gazeController.getPoint(now);
@@ -601,6 +642,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
     window.removeEventListener("keyup", onKeyUp);
     distractions.destroy();
     glitches.destroy();
+    desk.destroy();
     radio.destroy();
     for (const view of views) view.renderer.destroy();
   }
@@ -619,7 +661,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
         telemetry,
       });
       session = null;
-      if (!disposed) ctx.go("debrief", { result });
+      if (!disposed) ctx.go("debrief", { result, announce: true });
     } catch (error) {
       console.error("Could not complete the shift.", error);
       setStatus("DEBRIEF FAILED · RETURNING TO DESKTOP");

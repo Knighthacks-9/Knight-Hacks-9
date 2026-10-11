@@ -1,8 +1,11 @@
 import { installAnalytics } from "./analytics";
+import { premium } from "./audio";
 import { startNightwatchUi } from "./ui";
 
 // Analytics must listen before the first shift starts.
 installAnalytics();
+// Find out early which paid features (voice, AI dispatcher) still work.
+void premium.check();
 
 const app = document.getElementById("app")!;
 
