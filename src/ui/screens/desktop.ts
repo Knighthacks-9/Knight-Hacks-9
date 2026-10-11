@@ -12,6 +12,11 @@ import type { AppContext, Screen, ScreenName } from "../context";
 import { h, icon, mmss, pad2 } from "../dom";
 import { ICONS } from "../icons";
 import { openFloatingWindow } from "../window";
+import {
+  SHIFT_SETTINGS_EVENT,
+  notifyShiftSettings,
+  openShiftSetup,
+} from "./shiftSetup";
 
 const README = [
   "KNIGHT'S EYE v1.04 - ATTENTION TRAINING",
@@ -120,6 +125,7 @@ export function buildDesktop(
   open: (screen: ScreenName) => void,
   openLastDebrief: () => void,
   power: (mode: PowerMode) => void,
+  shiftSetup: () => void,
 ) {
   const layer = h("div", { class: "desk-layer" });
   const overlay = h("div", { class: "app-overlay" });
@@ -157,8 +163,11 @@ export function buildDesktop(
     (f, i) => [f.name, () => openTextFile(f.name, f.text, i)] as const,
   );
 
+  // Gaze Setup lives inside KNIGHT'S EYE: its shortcuts open that window, and
+  // BEGIN SHIFT there starts the calibration.
+  const openKnightsEye = () => open("desktop");
   const shortcuts: Shortcut[] = [
-    { label: "Gaze Setup", icon: "gaze", open: () => open("calibration") },
+    { label: "Gaze Setup", icon: "gaze", open: openKnightsEye },
     { label: "Watch Station", icon: "watch", open: () => open("watch") },
     { label: "Last Debrief", icon: "debrief", open: openLastDebrief },
     ...fileOpeners.map(([label, run]) => ({
@@ -285,7 +294,8 @@ export function buildDesktop(
       "ul",
       null,
       startItem("Begin Shift", "play", () => open("calibration")),
-      startItem("Gaze Setup", "eye", () => open("calibration")),
+      startItem("Shift Setup", "window", shiftSetup),
+      startItem("Gaze Setup", "eye", openKnightsEye),
       startItem("Watch Station", "cctv", () => open("watch")),
       startItem("Last Debrief", "chart", openLastDebrief),
       ...fileOpeners.map(([label, run]) => startItem(label, "note", run)),
@@ -394,8 +404,10 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
     playSfx(next === ctx.state.shiftSeconds ? "deny" : "blip");
     ctx.state.shiftSeconds = next;
     saveShiftSeconds(next);
-    showShift();
+    notifyShiftSettings(ctx);
   };
+  // Shift Setup can change the length too.
+  ctx.root.addEventListener(SHIFT_SETTINGS_EVENT, showShift);
   const begin = h(
     "button",
     {
@@ -499,6 +511,18 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
               class: "btn95",
               onclick: () => {
                 playSfx("click");
+                openShiftSetup(ctx);
+              },
+            },
+            "SHIFT SETUP...",
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "btn95",
+              onclick: () => {
+                playSfx("click");
                 ctx.go("watch");
               },
             },
@@ -526,5 +550,8 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
     if (!value) begin.focus();
   }
   ctx.setTask("KNIGHT'S EYE", () => setMinimized(!minimized));
-  return () => win.destroy();
+  return () => {
+    ctx.root.removeEventListener(SHIFT_SETTINGS_EVENT, showShift);
+    win.destroy();
+  };
 };

@@ -1,4 +1,5 @@
 import type { NightwatchService, ShiftResult } from "./service";
+import type { ShiftSettings } from "./shiftSettings";
 
 export type ScreenName = "desktop" | "calibration" | "watch" | "debrief";
 
@@ -10,8 +11,11 @@ export interface ScreenParams {
 }
 
 export interface AppState {
+  /** Difficulty, 1-3. */
   level: number;
   shiftSeconds: number;
+  /** Shift Setup choices layered on top of the level. */
+  settings: ShiftSettings;
 }
 
 export interface AppContext {

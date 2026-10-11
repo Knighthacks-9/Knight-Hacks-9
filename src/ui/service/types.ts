@@ -27,12 +27,19 @@ export interface CameraFeed {
 
 export interface LevelConfig {
   level: number;
-  cameraCount: 4 | 6 | 9;
+  cameraCount: 2 | 4 | 6 | 9;
   expectedAnomalies: number;
 }
 
 export interface ShiftConfig extends LevelConfig {
   durationSeconds: number;
+  /**
+   * True when the player chose the anomaly count: the shift has exactly
+   * expectedAnomalies. Otherwise long shifts can add more.
+   */
+  fixedAnomalies?: boolean;
+  /** Multiplier on how fast ordinary people arrive. Defaults to 1. */
+  npcSpawnRate?: number;
 }
 
 export interface AnomalyReport {
