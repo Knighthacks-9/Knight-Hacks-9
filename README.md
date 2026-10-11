@@ -1,6 +1,46 @@
 # Knight's Eye
 
-A small browser game for a four-person team, built with Phaser and Vite.
+**Train your attention.** Knight's Eye is an attention-training game set at a
+night-shift security desk. You watch a wall of CCTV feeds while the game
+watches you: webcam eye tracking records which feed you are looking at, and
+the debrief shows what you caught, what you missed, and whether you were
+looking at it when it happened.
+
+Play it at <https://knightseye.us>.
+
+Built at Knight Hacks for the Full Sail "Pathways & Perception" serious games
+and simulation challenge, which asks for pathfinding, face detection, or both:
+
+- **Perception:** MediaPipe face and iris tracking, calibrated per player,
+  maps your gaze to a camera feed in the browser. Nothing is uploaded.
+- **Pathways:** the people on the feeds walk the building with A\*
+  pathfinding. Most follow ordinary routines; a few loiter, revisit doors,
+  enter restricted rooms, or route around the cameras.
+- **Who it helps:** anyone who has to hold attention across several screens,
+  such as security operators and monitoring staff. Missing an event while
+  looking straight at it is common, and hard to notice without feedback.
+
+## Team
+
+| Name          | School                        | Contributions                                                               |
+| ------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| Lilly Liu     | University of Florida         | Computer vision eye tracking, AI dispatcher, interface design, project lead |
+| Karam Hack    | University of Central Florida | CCTV gameplay, startup sequence, website hosting                            |
+| Dev Shill     | University of Central Florida | World and AI gameplay, NPC sprites, mini map                                |
+| Sanjana Metla | University of Central Florida | Analytics and feedback statistics, debrief interface, presentation          |
+
+Sprite artists are credited in the in-game **Attributions** file.
+
+## How to play
+
+1. Press the **power button**. The machine boots and walks you through the
+   controls; use Back and Next, or ESC to skip.
+2. On the desktop, open **Shift Setup** to pick a difficulty, then press
+   **BEGIN SHIFT** in the Knight's Eye window.
+3. Calibrate the webcam, or skip it and let the mouse stand in for your gaze.
+4. Watch the feeds. When someone acts suspicious, press **REPORT SIGHTING**
+   (or R) and click the feed, or hold Space and say "Camera 3, sighting".
+5. Read the debrief when the shift ends.
 
 ## Requirements
 
@@ -14,11 +54,13 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. The game opens on the Knight's Eye desktop
-(see [Desktop UI](#desktop-ui)); the original Phaser version is still available
-at `/?ui=classic`. From Calibration, adjust gaze sensitivity
-and smoothing, enable or disable mouse fallback, or run the nine-point gaze
-calibration. Settings and the fitted calibration are saved in browser storage.
+Open the local URL printed by Vite. The game starts switched off: press the
+power button, and the boot intro teaches the controls before the Knight's Eye
+desktop opens (see [Desktop UI](#desktop-ui)). Add `?boot=0` to skip both. The
+original Phaser version is still available at `/?ui=classic`. From
+Calibration, adjust gaze sensitivity and smoothing, enable or disable mouse
+fallback, or run the gaze calibration. Settings and the fitted calibration are
+saved in browser storage.
 
 Select **Enable webcam** on Calibration and grant camera permission to start
 MediaPipe Face Landmarker and the independent BlazeFace detector. On first use,
@@ -63,13 +105,33 @@ DOM (`src/ui/`): Desktop → Gaze Calibration → Watch Station → Shift Debrie
 
 - **Desktop:** double-click the shortcuts or use **START**. Set the shift length
   and press **BEGIN SHIFT** (or **Skip calibration**). Windows drag by their
-  title bars (arrow keys move a focused title bar).
+  title bars (arrow keys move a focused title bar). Each open window has a
+  taskbar button: click it to bring the window forward, and click it again to
+  minimize. **START** also has **Restart** (replays the boot intro) and
+  **Shut Down** (back to the power button).
+- **Shift Setup:** **Easy**, **Normal**, and **Hard** each select their own
+  options and lock the rest; **Custom** unlocks every option.
+
+  |                     | Easy   | Normal | Hard   |
+  | ------------------- | ------ | ------ | ------ |
+  | Cameras             | 2      | 4      | 6      |
+  | Anomalies           | 3      | 5      | 8      |
+  | NPC spawn rate      | Low    | Normal | High   |
+  | Pop-up distractions | Low    | Normal | High   |
+  | Feed glitches       | Off    | On     | On     |
+  | Report counter      | On     | Off    | Off    |
+  | Highlight           | Always | Timed  | Timed  |
+  | Anomaly aura        | Off    | Off    | Always |
+
+  The timer (0:30 to 60:00) is free on every difficulty. **ADVANCED** holds the
+  report window: how long after a suspect was on a feed a report still counts.
+  The presets live in `LEVEL_PRESETS` in `src/ui/shiftSettings.ts`.
+
 - **Gaze Calibration:** same settings and webcam pipeline as the classic scene.
-  Without a webcam, the nine-point run is a pointer calibration: click each
+  Without a webcam, the 13-point run is a pointer calibration: click each
   target. **TEST GAZE** lights up the feed under your gaze or mouse.
-- **Watch Station:** `LEVEL_1`–`LEVEL_3` show 4, 6, or 9 feeds with 3, 5,
-  or 8 expected anomalies (switching restarts the shift). The world has six
-  cameras, so level 3's last three feeds are placeholders with no anomalies.
+- **Watch Station:** shows 2, 4, or 6 feeds, set by the difficulty or by
+  Shift Setup (the world has six cameras).
   The corner button on a feed focuses it; **RESTORE GRID** or ESC returns.
   **REPORT SIGHTING** (or R), then click the feed where you saw something.
   Number keys 1–9 also work, and ESC cancels. Dispatch answers on the radio,
@@ -77,8 +139,10 @@ DOM (`src/ui/`): Desktop → Gaze Calibration → Watch Station → Shift Debrie
   Space) and say "Camera 3, sighting" to report by voice. Pop-ups and feed
   glitches show up during the shift; drag or close the pop-ups.
 - **Shift Debrief:** grade, detection, false reports, attention per feed, a
-  per-camera timeline, and coaching. The last debrief is saved for the
-  **Last Debrief** shortcut.
+  per-camera timeline, and coaching. The coaching notes end with one line per
+  missed anomaly: what it was, which feed showed it, when, and whether you
+  were looking at it. The last debrief is saved for the **Last Debrief**
+  shortcut.
 
 A camera report counts as a catch when that feed showed a suspect during their
 suspicious behavior (or up to 5 s after); otherwise it is a false report. The UI
@@ -213,10 +277,10 @@ code changes needed.
 
 | Folder           | Owner    | What lives there                                                           |
 | ---------------- | -------- | -------------------------------------------------------------------------- |
-| `src/vision/`    | Person 1 | Webcam, MediaPipe tracking, gaze model, calibration scene, mouse fallback  |
-| `src/world/`     | Person 2 | Map, cameras, A\* pathfinding, NPC routines and suspicious behaviors       |
-| `src/game/`      | Person 3 | Title, Shift, and Debrief scenes, camera feeds, levels                     |
-| `src/analytics/` | Person 4 | Shift logging, catch/miss classification, debrief report and panel         |
+| `src/vision/`    | Lilly    | Webcam, MediaPipe tracking, gaze model, calibration scene, mouse fallback  |
+| `src/world/`     | Dev      | Map, cameras, A\* pathfinding, NPC routines and suspicious behaviors       |
+| `src/game/`      | Karam    | Title, Shift, and Debrief scenes, camera feeds, levels                     |
+| `src/analytics/` | Sanjana  | Shift logging, catch/miss classification, debrief report and panel         |
 | `src/audio/`     | Shared   | Dispatcher voice and push-to-talk (`netlify/functions` proxies ElevenLabs) |
 | `src/shared/`    | Everyone | `types.ts` (the contract) and `eventBus.ts`                                |
 | `src/ui/`        | Shared   | Knight's Eye desktop UI; `service/` adapts it to the modules above         |
@@ -265,10 +329,10 @@ Rules:
   and flags share one timeline.
 - Work on feature branches and open pull requests.
 
-Dev shortcuts: `/?level=4` starts at level 4 (`?level=1`–`3` in the desktop
-UI), `/?screen=calibration`, `watch`, or `debrief` opens a desktop UI screen
-directly, and `/src/world/world-debug.html`
-runs the world on its own with a top-down view.
+Dev shortcuts: `/?boot=0` skips the power button and boot intro,
+`/?level=1`–`3` starts on Easy, Normal, or Hard, `/?screen=calibration`,
+`watch`, or `debrief` opens a desktop UI screen directly, and
+`/src/world/world-debug.html` runs the world on its own with a top-down view.
 
 ## GitHub Pages
 
