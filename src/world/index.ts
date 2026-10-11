@@ -15,6 +15,8 @@ export interface WorldHandle {
   stop(): void;
   /** Debug/testing: force a suspicious NPC right now. Returns the NPC id. */
   spawnSuspicious(behavior: SuspiciousBehavior): string;
+  /** Security caught this NPC (see WorldSim.detain). False if they already left. */
+  detain(npcId: string): boolean;
 }
 
 let current: WorldHandle | null = null;
@@ -50,6 +52,7 @@ export function startWorld(
       if (current === handle) current = null;
     },
     spawnSuspicious: (b) => sim.spawnSuspicious(b),
+    detain: (npcId) => sim.detain(npcId),
   };
   current = handle;
   return handle;

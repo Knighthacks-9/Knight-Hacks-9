@@ -22,7 +22,8 @@ export interface GlitchTarget {
 
 export class GlitchScheduler {
   private nextAt = randomBetween(...FIRST_AT);
-  private readonly timers = new Set<number>();
+  /** Running glitches: timer id → undo. */
+  private readonly timers = new Map<number, () => void>();
 
   constructor(private readonly targets: () => GlitchTarget[]) {}
 
@@ -41,17 +42,24 @@ export class GlitchScheduler {
     for (const target of picks) {
       target.setGlitch(kind, reduced);
       target.element.classList.add("is-glitching", `glitch-${kind}`);
-      const timer = window.setTimeout(() => {
-        this.timers.delete(timer);
+      const undo = () => {
         target.setGlitch(null, reduced);
         target.element.classList.remove("is-glitching", `glitch-${kind}`);
+      };
+      const timer = window.setTimeout(() => {
+        this.timers.delete(timer);
+        undo();
       }, duration);
-      this.timers.add(timer);
+      this.timers.set(timer, undo);
     }
   }
 
+  /** Stops scheduling and clears any glitch still showing. */
   destroy(): void {
-    for (const timer of this.timers) window.clearTimeout(timer);
+    for (const [timer, undo] of this.timers) {
+      window.clearTimeout(timer);
+      undo();
+    }
     this.timers.clear();
   }
 }

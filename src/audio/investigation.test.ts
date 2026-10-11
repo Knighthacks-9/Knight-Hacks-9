@@ -125,6 +125,26 @@ describe("InvestigationDesk", () => {
     expect(writes).toEqual(["acknowledged", "en_route"]);
   });
 
+  it("runs the full investigation after the shift when not fitting to it", async () => {
+    const lines: InvestigationLine[] = [];
+    const desk = new InvestigationDesk({
+      shiftSeconds: 100,
+      fitToShift: false,
+      locate: () => ({ camera: 2, location: "Hall West" }),
+      deliver: (line) => lines.push(line),
+      write: async (_stage, _facts, template) => template,
+    });
+    desk.start(suspectCase, 95);
+    expect(desk.busy).toBe(true);
+    for (let t = 95; t <= 95 + TOTAL + 1; t += 0.5) {
+      desk.update(t);
+      await flush();
+    }
+    expect(lines.map((l) => l.stage)).toEqual([...STAGES]);
+    expect(lines.every((l) => l.case === suspectCase)).toBe(true);
+    expect(desk.busy).toBe(false);
+  });
+
   it("gives a log-it line instead of investigating at the end of the shift", async () => {
     const { desk, lines } = setup(100);
     desk.start(suspectCase, 95);

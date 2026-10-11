@@ -1,6 +1,11 @@
 // Screen 3: WATCH_STATION.EXE, the maximized shift window. Camera workspace
 // on the left (2 to 6 feeds, focus mode, report mode, pop-ups, glitches);
 // side console on the right (report control, dispatch radio, end shift).
+//
+// The feeds follow the dispatcher's script as each line is heard: the
+// reported person is MARKED, an officer appears on scene, and a caught
+// suspect is boxed as CAPTURED and held. When the shift ends the feeds
+// freeze and dispatch closes out every open call before the debrief.
 import {
   InvestigationDesk,
   dispatchText,
@@ -26,7 +31,7 @@ import {
 } from "../service";
 import { planShift } from "../shiftSettings";
 import { DistractionManager } from "../watch/distractions";
-import { FeedRenderer } from "../watch/feedRenderer";
+import { FeedRenderer, type PersonMark } from "../watch/feedRenderer";
 import { GlitchScheduler } from "../watch/glitch";
 import { createMinimap } from "../watch/minimap";
 import { DispatchRadio, type RadioMessage } from "../watch/radio";
@@ -46,6 +51,29 @@ const STAGE_HEADLINES: Record<InvestigationLine["stage"], string> = {
   late: "LOGGED",
 };
 
+/** The feed's dispatch badge for each stage; `resolved` depends on the outcome. */
+const STAGE_BADGES: Record<
+  Exclude<InvestigationLine["stage"], "resolved">,
+  string
+> = {
+  acknowledged: "DISPATCH · REPORT ACK",
+  en_route: "DISPATCH · UNIT EN ROUTE",
+  on_scene: "DISPATCH · UNIT ON SCENE",
+  closed: "DISPATCH · CASE CLOSED",
+  late: "DISPATCH · LOGGED",
+};
+
+const MARK_TAGS: Record<PersonMark["kind"], string> = {
+  marked: "MARKED",
+  captured: "CAPTURED",
+  cleared: "CLEARED",
+};
+
+/** How long a closed case's badge stays on its feed. */
+const BADGE_LINGER_MS = 4000;
+/** After the shift, give up waiting on dispatch if nothing happens for this long. */
+const WRAP_UP_STALL_MS = 45_000;
+
 interface FeedView {
   feed: CameraFeed;
   index: number;
@@ -53,6 +81,12 @@ interface FeedView {
   renderer: FeedRenderer;
   rec: HTMLElement;
   focusButton: HTMLButtonElement;
+  /** Overlay holding the MARKED / CAPTURED boxes. */
+  marks: HTMLElement;
+  markBoxes: Map<string, HTMLElement>;
+  /** What dispatch is doing about this feed's report. */
+  badge: HTMLElement;
+  badgeTimer: number;
 }
 
 export const mountWatchStation: Screen = (ctx, params) => {
@@ -68,6 +102,15 @@ export const mountWatchStation: Screen = (ctx, params) => {
   let finished = false;
   let raf = 0;
   let shiftT = 0;
+  /** Dispatch's clock: the shift clock, and it keeps running after the shift. */
+  let deskT = 0;
+  /** The shift is over and dispatch is closing out its calls. */
+  let wrapping = false;
+  let completedShift = false;
+  let signedOff = false;
+  let lastDispatchProgress = 0;
+  /** Dispatch's marks on people, by NPC id. */
+  const marks = new Map<string, PersonMark>();
   let lastSnapshot: WorldSnapshot | null = null;
   let shownSecond = -1;
   let reportMode = false;
@@ -130,6 +173,15 @@ export const mountWatchStation: Screen = (ctx, params) => {
     ),
     cancelReport,
   );
+  const wrapBanner = h(
+    "div",
+    { class: "ws-banner ws-banner-wrap", role: "status", hidden: true },
+    h(
+      "span",
+      { class: "ws-banner-text" },
+      "SHIFT OVER · STAND BY WHILE DISPATCH CLOSES OUT OPEN CALLS",
+    ),
+  );
   const grid = h("div", {
     class: "ws-grid",
     "data-count": String(config.cameraCount),
@@ -148,6 +200,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
       h("div", { class: "ws-toolbar-right" }, restoreButton, online),
     ),
     banner,
+    wrapBanner,
     stage,
   );
 
@@ -209,7 +262,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
     onTranscript: (text, provider) => {
       eventBus.emit("radio:report", { text, t: shiftT, provider });
       const n = parseCameraCommand(text, views.length);
-      if (!session || finished) return "SHIFT NOT ACTIVE";
+      if (!session || finished || wrapping) return "SHIFT NOT ACTIVE";
       if (n === null) return `"${text.toUpperCase()}" · CAMERA NOT RECOGNIZED`;
       void submit(views[n - 1], "voice", text);
       return `VOICE REPORT FILED: ${views[n - 1].feed.label}`;
@@ -218,9 +271,11 @@ export const mountWatchStation: Screen = (ctx, params) => {
   const radioPanel = panel("AI DISPATCH RADIO", null, radio.root);
 
   // Each filed report is investigated over the radio; the world decides the
-  // outcome, the AI dispatcher only words it.
+  // outcome, the AI dispatcher only words it. Every report gets the full
+  // investigation: the shift waits for dispatch to finish (see beginWrapUp).
   const desk = new InvestigationDesk({
     shiftSeconds: config.durationSeconds,
+    fitToShift: false,
     locate: (npcId) =>
       locateNpc(
         lastSnapshot,
@@ -229,12 +284,23 @@ export const mountWatchStation: Screen = (ctx, params) => {
         npcId,
       ),
     deliver: (line) => {
-      const label = views[line.camera - 1]?.feed.label ?? `CAM ${line.camera}`;
+      lastDispatchProgress = performance.now();
+      const view = views[line.camera - 1];
+      const label = view?.feed.label ?? `CAM ${line.camera}`;
       radio.receive(
         {
           headline: `${STAGE_HEADLINES[line.stage]}: ${label}`,
           text: line.text,
           play: () => speak(line.text),
+          onStart: () => {
+            lastDispatchProgress = performance.now();
+            view?.root.classList.add("is-radio");
+            followScript(line);
+          },
+          onEnd: () => {
+            lastDispatchProgress = performance.now();
+            view?.root.classList.remove("is-radio");
+          },
         } satisfies RadioMessage,
         0,
       );
@@ -249,7 +315,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
       class: "btn95 ws-end",
       onclick: () => {
         playSfx("click");
-        void finish(shiftT >= config.durationSeconds);
+        beginWrapUp(shiftT >= config.durationSeconds);
       },
     },
     "END SHIFT / DEBRIEF",
@@ -352,7 +418,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   }
 
   function setReportMode(on: boolean): void {
-    if (finished || !session) return;
+    if (finished || wrapping || !session) return;
     if (on === reportMode) return;
     reportMode = on;
     playSfx(on ? "select" : "cancel");
@@ -401,7 +467,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
     source: AnomalyReport["source"],
     transcript?: string,
   ): Promise<void> {
-    if (!view || !session || finished) return;
+    if (!view || !session || finished || wrapping) return;
     setReportMode(false);
     const report: AnomalyReport = {
       cameraId: view.feed.id,
@@ -440,8 +506,106 @@ export const mountWatchStation: Screen = (ctx, params) => {
         suspect: receipt.suspect?.behavior ?? null,
         npcId: receipt.suspect?.npcId ?? null,
       },
-      shiftT,
+      deskT,
     );
+  }
+
+  // --- Following the dispatcher's script --------------------------------------
+  /** Updates the feeds as the player hears each investigation line. */
+  function followScript(line: InvestigationLine): void {
+    const c = line.case;
+    const view = views[line.camera - 1];
+    const npc = c.npcId;
+    const mark = npc ? marks.get(npc) : undefined;
+    switch (line.stage) {
+      case "acknowledged":
+      case "late":
+        if (npc) marks.set(npc, { kind: "marked", unit: false });
+        break;
+      case "on_scene":
+        // The officer appears beside the subject (wherever they are now), or
+        // checks the reported area when there was nobody to point at.
+        if (mark) mark.unit = true;
+        else if (!npc) view?.renderer.setUnitOnScene(true);
+        break;
+      case "resolved":
+        if (npc && c.suspect) {
+          session?.detain?.(npc);
+          marks.set(npc, { kind: "captured", unit: true });
+          playSfx("send");
+        } else if (npc) {
+          marks.set(npc, { kind: "cleared", unit: true });
+        }
+        break;
+      case "closed":
+        // Cleared people go about their business; a captured suspect stays
+        // boxed until they're led out of view.
+        if (npc && mark?.kind === "cleared") marks.delete(npc);
+        view?.renderer.setUnitOnScene(false);
+        break;
+    }
+    if (view) setBadge(view, line);
+  }
+
+  function setBadge(view: FeedView, line: InvestigationLine): void {
+    const { stage } = line;
+    const caught = line.case.suspect !== null;
+    view.badge.textContent =
+      stage === "resolved"
+        ? caught
+          ? "DISPATCH · SUSPECT CAPTURED"
+          : "DISPATCH · FALSE REPORT, CLEARED"
+        : STAGE_BADGES[stage];
+    view.badge.dataset.tone =
+      stage === "resolved" || stage === "closed"
+        ? caught
+          ? "good"
+          : "bad"
+        : "info";
+    view.badge.hidden = false;
+    window.clearTimeout(view.badgeTimer);
+    if (stage === "closed" || stage === "late") {
+      view.badgeTimer = window.setTimeout(() => {
+        view.badge.hidden = true;
+      }, BADGE_LINGER_MS);
+    }
+  }
+
+  /** Positions the MARKED / CAPTURED boxes over the people the feed drew. */
+  function syncMarks(view: FeedView): void {
+    const seen = new Set<string>();
+    for (const box of view.renderer.markBoxes) {
+      seen.add(box.npcId);
+      let el = view.markBoxes.get(box.npcId);
+      if (!el) {
+        el = h(
+          "div",
+          { class: "feed-mark" },
+          h("span", { class: "feed-mark-tag" }),
+        );
+        view.marks.append(el);
+        view.markBoxes.set(box.npcId, el);
+      }
+      if (el.dataset.kind !== box.mark.kind) {
+        el.dataset.kind = box.mark.kind;
+        el.firstElementChild!.textContent = MARK_TAGS[box.mark.kind];
+      }
+      el.style.transform = `translate(${Math.round(box.left)}px, ${Math.round(box.top)}px)`;
+      el.style.width = `${Math.round(box.width)}px`;
+      el.style.height = `${Math.round(box.height)}px`;
+    }
+    for (const [id, el] of view.markBoxes) {
+      if (seen.has(id)) continue;
+      el.remove();
+      view.markBoxes.delete(id);
+    }
+  }
+
+  function drawFeeds(): void {
+    for (const view of views) {
+      view.renderer.draw(lastSnapshot, shiftT, marks);
+      syncMarks(view);
+    }
   }
 
   function buildFeeds(s: ShiftSession): void {
@@ -452,6 +616,15 @@ export const mountWatchStation: Screen = (ctx, params) => {
         "aria-hidden": "true",
       });
       const rec = h("span", { class: "feed-rec" });
+      const marksLayer = h("div", {
+        class: "feed-marks",
+        "aria-hidden": "true",
+      });
+      const badge = h("span", {
+        class: "feed-dispatch",
+        role: "status",
+        hidden: true,
+      });
       const focusButton = h("button", {
         type: "button",
         class: "feed-focus",
@@ -480,6 +653,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
           "div",
           { class: "feed-view" },
           canvas,
+          marksLayer,
           h("div", { class: "feed-scan", "aria-hidden": "true" }),
           h(
             "div",
@@ -493,6 +667,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
           rec,
           h("span", { class: "feed-glitch-label" }, "SYNC LOSS"),
           h("span", { class: "feed-stamp" }, "REPORT SENT"),
+          badge,
           feed.online
             ? null
             : h("span", { class: "feed-offline" }, "NO SIGNAL"),
@@ -504,6 +679,10 @@ export const mountWatchStation: Screen = (ctx, params) => {
         root,
         rec,
         focusButton,
+        marks: marksLayer,
+        markBoxes: new Map(),
+        badge,
+        badgeTimer: 0,
         renderer: new FeedRenderer(
           canvas,
           feed,
@@ -552,8 +731,16 @@ export const mountWatchStation: Screen = (ctx, params) => {
     if (!session) return;
     const dt = Math.min((now - last) / 1000, MAX_DT);
     last = now;
+    if (wrapping) {
+      // The world holds still on its last frame; dispatch keeps going.
+      deskT += dt;
+      desk.update(deskT);
+      drawFeeds();
+      checkWrapUp(now);
+      return;
+    }
     const { t, snapshot } = session.tick(dt);
-    shiftT = t;
+    shiftT = deskT = t;
     lastSnapshot = snapshot;
     desk.update(t);
 
@@ -586,10 +773,9 @@ export const mountWatchStation: Screen = (ctx, params) => {
     });
     if (source === "tracker") telemetry.webcamUsed = true;
 
-    for (const view of views) {
+    for (const view of views)
       view.root.classList.toggle("is-watched", view === watched);
-      view.renderer.draw(snapshot, t);
-    }
+    drawFeeds();
     reticle.hidden = source !== "tracker";
     if (source === "tracker")
       reticle.style.transform = `translate(${gx - box.left}px, ${gy - box.top}px)`;
@@ -597,7 +783,61 @@ export const mountWatchStation: Screen = (ctx, params) => {
     distractions.update(t, onPopup);
     if (plan.glitches) glitches.update(t);
     updateTimer(t);
-    if (t >= config.durationSeconds) void finish(true);
+    if (t >= config.durationSeconds) beginWrapUp(true);
+  }
+
+  // --- End of shift -------------------------------------------------------------
+  /**
+   * Ends the watch: no more reports, the feeds freeze, and every dispatch
+   * line still to come is played (auto-play is forced on). The debrief opens
+   * once dispatch has closed every call and signed off (checkWrapUp).
+   */
+  function beginWrapUp(completed: boolean): void {
+    if (wrapping || finished || !session) return;
+    setReportMode(false);
+    wrapping = true;
+    completedShift = completed;
+    lastDispatchProgress = performance.now();
+    glitches.destroy();
+    reticle.hidden = true;
+    for (const view of views) view.root.classList.remove("is-watched");
+    reportButton.disabled = true;
+    endButton.disabled = true;
+    endButton.textContent = "WAITING FOR DISPATCH...";
+    wrapBanner.hidden = false;
+    workspace.classList.add("is-wrapping");
+    timer.textContent = "SHIFT OVER";
+    timer.classList.remove("is-ending");
+    setStatus("SHIFT OVER · DISPATCH CLOSING OUT CALLS");
+    radio.drain();
+  }
+
+  function checkWrapUp(now: number): void {
+    if (finished) return;
+    if (now - lastDispatchProgress > WRAP_UP_STALL_MS) {
+      console.warn(
+        "[dispatch] No radio progress after the shift; filing the debrief.",
+      );
+      void finish(completedShift);
+      return;
+    }
+    if (desk.busy || radio.busy) return;
+    if (!signedOff) {
+      // Every call is closed: dispatch signs off, then the debrief opens.
+      signedOff = true;
+      lastDispatchProgress = now;
+      radio.receive(
+        {
+          headline: "SHIFT END",
+          text: dispatchText("shift_end"),
+          play: () => sayDispatch("shift_end"),
+          onStart: () => (lastDispatchProgress = performance.now()),
+        },
+        600,
+      );
+      return;
+    }
+    void finish(completedShift);
   }
 
   // --- Keyboard ---------------------------------------------------------------

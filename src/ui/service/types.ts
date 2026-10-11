@@ -107,6 +107,11 @@ export interface ShiftSession {
   /** Advances the shift clock by dt seconds and returns the latest world state. */
   tick(dt: number): ShiftFrame;
   recordGaze(observation: GazeObservation): void;
+  /**
+   * Dispatch caught this person: they stop, and are led out a few seconds
+   * later. Optional; a backend without a world can leave it out.
+   */
+  detain?(npcId: string): void;
 }
 
 /** A span of shift time, in seconds. */

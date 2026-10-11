@@ -1,10 +1,11 @@
 // POST /api/tts { text } → audio/mpeg from ElevenLabs. Keeps the API key on the
 // server. ElevenLabs error statuses (401 bad key, 429 out of credits) are
 // passed through so the client can switch to its browser fallback.
+import { withCors } from "../lib/cors";
 
 const MAX_TEXT_LENGTH = 500;
 
-export default async (req: Request): Promise<Response> => {
+export default withCors(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") {
     return json({ error: "Use POST." }, 405);
   }
@@ -60,7 +61,7 @@ export default async (req: Request): Promise<Response> => {
     status: 200,
     headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" },
   });
-};
+});
 
 export const config = { path: "/api/tts" };
 
