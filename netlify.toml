@@ -1,11 +1,12 @@
-# Netlify hosts the game plus the voice proxy functions in netlify/functions.
+# Netlify hosts only the API: the functions in netlify/functions (/api/*),
+# which keep the ElevenLabs and Hugging Face keys off the browser. The game
+# itself is on GitHub Pages and calls them via VITE_API_BASE.
 [build]
-  command = "npm run build"
-  publish = "dist"
-
-# Serve from the site root (the GitHub Pages build uses /Knight-Hacks-9/).
-[build.environment]
-  BASE_PATH = "/"
+  # Nothing to build: Netlify bundles the functions on its own. A non-empty
+  # command keeps a build command saved in the Netlify UI from running.
+  command = "echo 'API only: the game is deployed to GitHub Pages.'"
+  # A placeholder page for the site root.
+  publish = "netlify/static"
 
 # `npm run dev:netlify`: Vite on 5173 behind Netlify's dev server on 8888,
 # which also runs the functions at /api/*.
