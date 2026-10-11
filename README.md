@@ -143,8 +143,8 @@ or deleted lines. Commit the MP3s so deploys play them without spending
 credits. Play one in code with `playDispatchLine(id, text)` from `src/audio`,
 which costs nothing and falls back to `speak(text)`.
 
-Voice needs the Netlify functions: the Netlify site, `npm run dev:netlify`,
-or the GitHub Pages build pointed at Netlify (see [GitHub Pages](#github-pages)).
+Voice needs the Netlify functions: `npm run dev:netlify` locally, or the
+GitHub Pages build pointed at Netlify (see [GitHub Pages](#github-pages)).
 Without them it uses the browser fallbacks.
 
 ### AI dispatcher (Hugging Face)
@@ -272,19 +272,26 @@ runs the world on its own with a top-down view.
 
 ## GitHub Pages
 
-Vite uses `/` while serving locally and `/Knight-Hacks-9/` for production
-builds, so the generated files can be deployed directly to this repository's
-GitHub Pages project site.
+Vite uses `/` while serving locally. The Pages workflow builds with relative
+asset URLs (`BASE_PATH=./`), so the same build works on a custom domain and at
+`https://knighthacks-9.github.io/Knight-Hacks-9/`. Load files from `public/`
+through `import.meta.env.BASE_URL`, never a leading `/`.
 
-Pages only serves static files, so the voice and AI functions stay on Netlify
-and the Pages build calls them cross-origin:
+**Dropping the custom domain:** remove it under repo Settings → Pages (while it
+is set, github.io redirects to it), then delete its DNS records. Keep the
+github.io origin in Netlify's `ALLOWED_ORIGINS` the whole time.
+
+Pages only serves static files, so the voice and AI functions run on Netlify
+and the Pages build calls them cross-origin. Netlify hosts only the API
+(`netlify.toml` skips the game build; its root is a placeholder page):
 
 1. In the GitHub repo, add an Actions **variable** (not a secret) named
    `VITE_API_BASE` set to the Netlify site URL, e.g.
    `https://your-site.netlify.app`. The deploy workflow passes it to the build.
 2. In Netlify, add `ALLOWED_ORIGINS` with the Pages origin (scheme and host
    only, comma-separated if more than one). It defaults to
-   `https://knighthacks-9.github.io`; set it if Pages uses a custom domain.
+   `https://knighthacks-9.github.io`. With a custom domain, list both, e.g.
+   `https://knightseye.us,https://knighthacks-9.github.io`.
    Other origins get no CORS headers (`netlify/lib/cors.ts`).
 3. Keep the API keys in Netlify only. Never put them in a `VITE_` variable:
    those are built into the public JavaScript.
