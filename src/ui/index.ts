@@ -11,8 +11,10 @@ import { runBootSequence, runShutdown } from "./screens/boot";
 import { mountCalibration } from "./screens/calibration";
 import { mountDebrief } from "./screens/debrief";
 import { buildDesktop, mountMainMenu, type PowerMode } from "./screens/desktop";
+import { openShiftSetup } from "./screens/shiftSetup";
 import { mountWatchStation } from "./screens/watchStation";
 import { levelConfig, nightwatchService } from "./service";
+import { loadShiftSettings } from "./shiftSettings";
 import { openFloatingWindow } from "./window";
 import "./nightwatch.css";
 
@@ -65,6 +67,7 @@ export function startNightwatchUi(root: HTMLElement): void {
     (screen) => ctx.go(screen),
     () => void openLastDebrief(),
     (mode) => void powerCycle(mode),
+    () => openShiftSetup(ctx),
   );
 
   const ctx: AppContext = {
@@ -79,6 +82,7 @@ export function startNightwatchUi(root: HTMLElement): void {
           : 1,
       ).level,
       shiftSeconds: loadShiftSeconds(),
+      settings: loadShiftSettings(),
     },
     go(screen: ScreenName, params: ScreenParams = {}) {
       if (switching) return;

@@ -110,14 +110,21 @@ export class DistractionManager {
   dismissed = 0;
   /** When gaze rested on any pop-up. */
   readonly gaze: TimeSpan[] = [];
-  private nextAt = randomBetween(...FIRST_AT);
+  private nextAt: number;
   private deck: Distraction[] = [];
   private reminders: { at: number; item: Distraction }[] = [];
   private readonly open = new Set<OpenPopup>();
   private slot = Math.floor(Math.random() * 6);
   private t = 0;
 
-  constructor(private readonly layer: HTMLElement) {}
+  /** `frequency` scales how often pop-ups appear; 0 turns them off. */
+  constructor(
+    private readonly layer: HTMLElement,
+    private readonly frequency = 1,
+  ) {
+    this.nextAt =
+      frequency > 0 ? randomBetween(...FIRST_AT) / frequency : Infinity;
+  }
 
   /** Called every frame with shift time; spawns pop-ups on schedule. */
   update(t: number, gazeOnPopup: boolean): void {
@@ -133,7 +140,7 @@ export class DistractionManager {
       this.show(this.reminders.splice(due, 1)[0].item);
     }
     if (t >= this.nextAt) {
-      this.nextAt = t + randomBetween(...EVERY);
+      this.nextAt = t + randomBetween(...EVERY) / this.frequency;
       if (this.open.size < MAX_OPEN) this.show(this.draw());
     }
   }
