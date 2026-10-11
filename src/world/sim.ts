@@ -31,6 +31,10 @@ export interface SimOptions {
   seed?: number;
   /** Shift length in seconds. Suspicious events are spread across it. */
   shiftSeconds?: number;
+  /** Suspicious events to schedule. Defaults to one per ~40s, at least 3. */
+  anomalyCount?: number;
+  /** Multiplier on the walk-in pace and crowd size. 1 is the normal pace. */
+  spawnRate?: number;
 }
 
 export interface SimListener {
@@ -65,6 +69,8 @@ export class WorldSim {
   private nextNormalAt = 0;
   private normalsSpawned = 0;
   private shiftSeconds: number;
+  private anomalyCount: number;
+  private spawnRate: number;
   private schedule: { at: number; behavior: SuspiciousBehavior }[];
   private camSets: { cam: CameraDef; tiles: Set<number> }[];
   private seenAny: Uint8Array;
@@ -77,6 +83,9 @@ export class WorldSim {
     this.map = map;
     this.rng = new Rng(opts.seed ?? Date.now());
     this.shiftSeconds = opts.shiftSeconds ?? 300;
+    this.anomalyCount =
+      opts.anomalyCount ?? Math.max(3, Math.round(this.shiftSeconds / 40));
+    this.spawnRate = Math.max(0.1, opts.spawnRate ?? 1);
     this.camSets = map.cameras.map((cam) => ({
       cam,
       tiles: new Set(cam.visibleTiles),
@@ -89,7 +98,7 @@ export class WorldSim {
 
   /** Suspicious events spread across the shift, gaps shrinking toward the end. */
   private buildSchedule(): { at: number; behavior: SuspiciousBehavior }[] {
-    const count = Math.max(3, Math.round(this.shiftSeconds / 40));
+    const count = this.anomalyCount;
     const start = Math.min(15, this.shiftSeconds * 0.1);
     // Leave time at the end to finish each event. Unchanged (60s) for shifts
     // of 90s or more; on shorter ones half the shift, since NPCs need time
@@ -120,7 +129,7 @@ export class WorldSim {
     if (t < s - Math.min(20, Math.max(s - 70, s * 0.3))) {
       if (t >= this.nextNormalAt) {
         const alive = this.npcs.length;
-        if (alive < MAX_NORMAL_NPCS) {
+        if (alive < Math.round(MAX_NORMAL_NPCS * this.spawnRate)) {
           this.spawn(normalPlan(this.map, this.rng));
           this.normalsSpawned++;
         }
@@ -128,7 +137,7 @@ export class WorldSim {
         this.nextNormalAt =
           this.normalsSpawned < QUICK_START_NPCS
             ? t + this.rng.range(0.75, 1.5)
-            : t + this.rng.range(4, 9);
+            : t + this.rng.range(4, 9) / this.spawnRate;
       }
     }
     while (this.schedule.length > 0 && this.schedule[0].at <= t) {

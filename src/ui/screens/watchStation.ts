@@ -16,6 +16,7 @@ import {
   type ShiftSession,
   type ShiftTelemetry,
 } from "../service";
+import { planShift } from "../shiftSettings";
 import { DistractionManager } from "../watch/distractions";
 import { FeedRenderer } from "../watch/feedRenderer";
 import { GlitchScheduler } from "../watch/glitch";
@@ -49,10 +50,9 @@ export const mountWatchStation: Screen = (ctx, params) => {
   const { service } = ctx;
   const level = levelConfig(params.level ?? ctx.state.level);
   ctx.state.level = level.level;
-  const config: ShiftConfig = {
-    ...level,
-    durationSeconds: ctx.state.shiftSeconds,
-  };
+  // The level plus whatever the player changed in Shift Setup.
+  const plan = planShift(level, ctx.state.shiftSeconds, ctx.state.settings);
+  const config: ShiftConfig = plan.config;
 
   let session: ShiftSession | null = null;
   let disposed = false;
@@ -148,13 +148,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   const popups = h("div", { class: "ws-popups" });
   const minimap = createMinimap(() => playSfx("click"));
   minimap.setMap(null); // enabled once the shift has its map
-  const stage = h(
-    "div",
-    { class: "ws-stage" },
-    grid,
-    popups,
-    minimap.panel,
-  );
+  const stage = h("div", { class: "ws-stage" }, grid, popups, minimap.panel);
   const workspace = h(
     "div",
     { class: "ws-workspace" },
@@ -273,7 +267,10 @@ export const mountWatchStation: Screen = (ctx, params) => {
   updateTimer(0);
   updateReportPanel();
 
-  const distractions = new DistractionManager(popups);
+  const distractions = new DistractionManager(
+    popups,
+    plan.distractionFrequency,
+  );
   const glitches = new GlitchScheduler(() =>
     views.map((v) => ({
       element: v.root,
@@ -490,7 +487,14 @@ export const mountWatchStation: Screen = (ctx, params) => {
         root,
         rec,
         focusButton,
-        renderer: new FeedRenderer(canvas, feed, s.map, config.level),
+        renderer: new FeedRenderer(
+          canvas,
+          feed,
+          s.map,
+          config.level,
+          plan.highlight,
+          plan.aura,
+        ),
       };
       focusButton.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -572,7 +576,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
       reticle.style.transform = `translate(${gx - box.left}px, ${gy - box.top}px)`;
 
     distractions.update(t, onPopup);
-    glitches.update(t);
+    if (plan.glitches) glitches.update(t);
     updateTimer(t);
     if (t >= config.durationSeconds) void finish(true);
   }
