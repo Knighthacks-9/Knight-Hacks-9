@@ -290,6 +290,15 @@ export function createLocalNightwatchService(
       // INTEGRATION: report submission. The analytics module scores flags by
       // suspect, so a camera report is matched to the suspect that camera saw.
       const event = resolveReport(shift, report.cameraId, t);
+      // The only suspect on that feed was already reported: don't file it
+      // again, so the same anomaly can't be reported over and over.
+      if (event?.reported) {
+        return {
+          reportNumber: shift.reportCount,
+          cameraId: report.cameraId,
+          duplicate: true,
+        } satisfies ReportReceipt;
+      }
       if (event) event.reported = true;
       bus.emit("flag:created", {
         t,
@@ -302,6 +311,7 @@ export function createLocalNightwatchService(
       return {
         reportNumber: shift.reportCount,
         cameraId: report.cameraId,
+        duplicate: false,
       } satisfies ReportReceipt;
     },
 
