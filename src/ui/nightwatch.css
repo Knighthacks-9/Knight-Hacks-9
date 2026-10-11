@@ -329,8 +329,8 @@ body.nw {
 
 .desk-icons {
   position: absolute;
-  top: 12px;
-  left: 8px;
+  top: 24px;
+  left: 24px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -2829,7 +2829,7 @@ body.nw {
   .desk-icons {
     flex-direction: row;
     flex-wrap: wrap;
-    right: 8px;
+    right: 24px;
   }
 }
 
