@@ -3203,3 +3203,30 @@ body.nw {
     grid-column: 1;
   }
 }
+
+
+/* Main menu: premium feature settings (realistic voice, AI dispatcher). */
+.menu-premium .menu-premium-row {
+  margin-top: 12px;
+}
+
+.menu-premium-toggle {
+  min-width: 128px;
+}
+
+.menu-premium.is-unsupported .menu-label,
+.menu-premium.is-unsupported .menu-premium-toggle {
+  color: var(--lo);
+  text-shadow: 1px 1px 0 var(--hi);
+}
+
+.menu-premium.is-unsupported .menu-premium-toggle {
+  cursor: not-allowed;
+}
+
+.menu-premium-note {
+  margin: 4px 0 0;
+  color: var(--lo);
+  font-size: 17px;
+  text-align: center;
+}

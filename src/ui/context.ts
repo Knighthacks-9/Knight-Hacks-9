@@ -8,6 +8,8 @@ export interface ScreenParams {
   result?: ShiftResult;
   /** Level to start the Watch Station on. */
   level?: number;
+  /** The shift just ended: the dispatcher reads the debrief summary aloud. */
+  announce?: boolean;
 }
 
 export interface AppState {
