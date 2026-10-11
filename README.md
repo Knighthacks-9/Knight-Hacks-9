@@ -97,7 +97,8 @@ has your spoken description:
 4. The panel switches to **DISPATCH**. The AI dispatcher acknowledges and asks
    for a description. Click **TALK**, describe the subject, and click
    **STOP** (or hold Space while talking). Once your words are transcribed
-   the report is filed (`flag:created`) and dispatch sends a unit.
+   the report is filed (`flag:created`) and dispatch sends a unit (see
+   [AI dispatcher](#ai-dispatcher-hugging-face)).
 
 If dispatch didn't catch anything, it asks you to say again. A report still
 waiting for its follow-up when the shift ends is not counted. The debrief
@@ -105,22 +106,28 @@ shows each report's incident type (✓ or ✗) and your description.
 
 ### Radio voice (ElevenLabs)
 
-The dispatcher voice and push-to-talk use ElevenLabs, with the free browser
-speech APIs as an automatic fallback. During a shift, use **TALK** in the
-DISPATCH tab or **hold Space**; a `● TRANSMITTING` indicator shows while you
-talk, and each transcript is published on the event bus as `radio:report`.
-Dispatcher lines (text and audio) live in `scripts/voice-lines.json`.
+The dispatcher voice uses ElevenLabs, with the free browser speech APIs as an
+automatic fallback. Each line plays the first of these that works:
+pre-generated MP3 → live ElevenLabs → browser voice. Push-to-talk uses the
+browser's speech recognition. During a shift, use **TALK** in the DISPATCH tab
+or **hold Space**; a `● TRANSMITTING` indicator shows while you talk, and each
+transcript is published on the event bus as `radio:report`. Dispatcher lines
+(text and audio) live in `scripts/voice-lines.json`.
 
 The ElevenLabs key never reaches the browser. Two Netlify Functions proxy the
-API: `/api/tts` (text to speech, max 500 characters) and `/api/stt`
-(speech to text with the `scribe_v2` model). ElevenLabs error codes pass
-through; after a 401 (bad key) or 429 (out of credits) the game uses browser
-speech for the rest of the session. The browser console logs which provider
-handled each line (`[voice] TTS provider: …`).
+API: `/api/tts` (text to speech, max 500 characters) and `/api/stt` (speech
+to text with the `scribe_v2` model, off unless `VITE_ELEVENLABS_STT=true`).
+ElevenLabs error codes pass through; after one that retrying won't fix (bad
+key, out of credits, not configured) the game uses browser speech for the rest
+of the session. The browser console logs which provider handled each line
+(`[voice] TTS provider: …`).
 
-**Set up the keys.** Copy `.env.example` to `.env` (git-ignored) and fill in
-`ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`. On Netlify, add the same two
-variables under Site configuration → Environment variables.
+**Set up the keys.** Copy `.env.example` to `.env` (git-ignored). In
+ElevenLabs, create an API key with **Text to Speech** and **User → Read**
+access (`/api/status` reads the subscription to see if credits are left), and
+copy a voice's **Voice ID**. Fill in `ELEVENLABS_API_KEY` and
+`ELEVENLABS_VOICE_ID`. On Netlify, add the same two variables under Site
+configuration → Environment variables.
 
 **Run with the functions locally.** `npm run dev:netlify` starts Netlify's
 dev server (via `npx netlify-cli`) at <http://localhost:8888>, which serves the
@@ -132,11 +139,62 @@ functions, so voice falls back to the browser APIs.
 **Pre-generate dispatcher lines.** `npm run voice:generate` reads
 `scripts/voice-lines.json` and writes `public/audio/dispatch_<id>.mp3` using
 the key in `.env`. Existing files are skipped, so re-running only pays for new
-or deleted lines. Play one in code with `playDispatchLine(id, text)` from
-`src/audio`, which costs nothing and falls back to `speak(text)`.
+or deleted lines. Commit the MP3s so deploys play them without spending
+credits. Play one in code with `playDispatchLine(id, text)` from `src/audio`,
+which costs nothing and falls back to `speak(text)`.
 
 Voice needs Netlify (or `npm run dev:netlify`). The GitHub Pages build has no
 functions, so there it always uses the browser fallbacks.
+
+### AI dispatcher (Hugging Face)
+
+After you file a report, dispatch runs an investigation over the radio:
+acknowledged → en route → on scene → resolved → closed. At the end of a shift
+the dispatcher sums it up on the debrief screen and reads it aloud.
+
+The game decides **what** happens; the AI only decides **how** it's said. The
+facts come from game state: the reported feed, whether the person really was
+suspicious (world ground truth), where they are when the unit arrives (so
+dispatch says if they moved), and, for the debrief, the analytics report
+(caught suspects, false reports, and each miss with its consequence). A real
+suspect is always detained and an innocent person is always cleared as a
+false report. Every line has a template, used whenever the AI is unavailable.
+
+- `netlify/functions/dispatch.mts` (`POST /api/dispatch { stage, facts }` →
+  `{ text }`) calls Hugging Face Inference Providers
+  (`router.huggingface.co/v1/chat/completions`). `HF_TOKEN` stays on the
+  server; Hugging Face error statuses pass through.
+- `src/audio/dispatchLine.ts` waits at most 2 s, then uses the template. The
+  console logs which one was used (`[dispatch] <stage>: hf` or `template`).
+  Lines are prefetched before they're due, so the radio doesn't lag.
+- Investigations are squeezed to finish before the shift timer ends. Reports in
+  the last 10 seconds get a "log it for the next crew" line instead.
+
+**Set up.** Create a token at <https://huggingface.co/settings/tokens> with the
+**Make calls to Inference Providers** permission. Add `HF_TOKEN` (and
+optionally `HF_MODEL`, default `google/gemma-4-26B-A4B-it`) to `.env`, and to
+Netlify's environment variables for deploys. Run with `npm run dev:netlify`;
+plain `npm run dev` and GitHub Pages have no functions, so they use the
+templates. Add `?ai=off` to the URL to skip the AI.
+
+### Premium features and fallbacks
+
+The realistic voice and the AI dispatcher are paid ("premium") features, and
+the game is built to keep working without them (`src/audio/premium.ts`):
+
+- On load, `GET /api/status` (`netlify/functions/status.mts`) reports which
+  ones the server can still provide: keys set and valid, and ElevenLabs
+  characters left. No server (GitHub Pages, plain `npm run dev`) means neither.
+- A feature that fails mid-game (out of credits, key removed) is switched off
+  for the rest of the session.
+- The main menu has **Realistic voice** and **AI dispatcher** ON/OFF settings,
+  saved in the browser. A feature that no longer works is greyed out with
+  "This feature is no longer supported."
+- Without them, the game uses the browser voice and the template lines.
+
+**To stop paying:** delete the ElevenLabs and Hugging Face variables in
+Netlify (or let the keys lapse). The game switches to free mode by itself; no
+code changes needed.
 
 ## Scripts
 
@@ -160,7 +218,7 @@ functions, so there it always uses the browser fallbacks.
 | `src/analytics/` | Person 4 | Shift logging, catch/miss classification, debrief report and panel         |
 | `src/audio/`     | Shared   | Dispatcher voice and push-to-talk (`netlify/functions` proxies ElevenLabs) |
 | `src/shared/`    | Everyone | `types.ts` (the contract) and `eventBus.ts`                                |
-| `src/ui/`        | Shared   | Knight's Eye desktop UI; `service/` adapts it to the modules above           |
+| `src/ui/`        | Shared   | Knight's Eye desktop UI; `service/` adapts it to the modules above         |
 
 `src/main.ts` installs analytics and starts the desktop UI (`src/ui`), or
 with `?ui=classic` loads `src/classic.ts`, which boots Phaser, registers the
