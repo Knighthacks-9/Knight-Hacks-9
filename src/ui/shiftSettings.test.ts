@@ -6,6 +6,7 @@ import {
   planShift,
   presetSettings,
   sanitizeShiftSettings,
+  toCustom,
 } from "./shiftSettings";
 
 const LEVEL = { level: 2, cameraCount: 6, expectedAnomalies: 5 } as const;
@@ -59,7 +60,7 @@ describe("shift settings", () => {
     expect(plan("timed").aura).toEqual({ seconds: 5 });
     expect(plan("off").aura).toEqual({ seconds: 0 });
     // The two effects are set separately.
-    expect(plan("off").highlight).toBeNull();
+    expect(plan("off").highlight).toEqual({ seconds: 2 });
     expect(
       planShift(LEVEL, 120, {
         ...DEFAULT_SHIFT_SETTINGS,
@@ -67,7 +68,7 @@ describe("shift settings", () => {
         highlight: "timed",
         highlightSeconds: 8,
       }),
-    ).toMatchObject({ highlight: { seconds: 8 }, aura: null });
+    ).toMatchObject({ highlight: { seconds: 8 }, aura: { seconds: 0 } });
   });
 
   it("locks a difficulty to its preset until Custom is chosen", () => {
@@ -113,6 +114,17 @@ describe("shift settings", () => {
     expect(planShift(easy, 120, DEFAULT_SHIFT_SETTINGS).glitches).toBe(false);
   });
 
+  it("switches to Custom from the preset on screen", () => {
+    const hard = { level: 3, cameraCount: 6, expectedAnomalies: 8 } as const;
+    const custom = toCustom(hard, {
+      ...DEFAULT_SHIFT_SETTINGS,
+      npcRate: "low",
+    });
+    expect(custom).toEqual({ ...presetSettings(hard), custom: true });
+    // Already Custom: the player's options carry over unchanged.
+    expect(toCustom(hard, custom)).toEqual(custom);
+  });
+
   it("repairs stored values", () => {
     expect(sanitizeShiftSettings(null)).toEqual(DEFAULT_SHIFT_SETTINGS);
     expect(
@@ -122,6 +134,7 @@ describe("shift settings", () => {
         npcRate: "fast",
         distractions: "off",
         glitches: "yes",
+        highlight: "auto",
       }),
     ).toEqual({
       ...DEFAULT_SHIFT_SETTINGS,

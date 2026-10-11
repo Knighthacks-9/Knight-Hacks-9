@@ -24,7 +24,7 @@ const README = [
   "",
   "1. GAZE SETUP",
   "   Tune sensitivity and smoothing. Enable the webcam and run the",
-  "   9-point calibration for eye tracking, or keep mouse fallback on",
+  "   13-point calibration for eye tracking, or keep mouse fallback on",
   "   and let the pointer stand in for your gaze.",
   "",
   "2. WATCH STATION",
@@ -111,6 +111,27 @@ const TEXT_FILES = [
   { name: "Credits.txt", text: CREDITS },
   { name: "Attributions.txt", text: ATTRIBUTIONS },
 ];
+/** Splits text into plain runs and clickable links for each URL in it. */
+function linkify(text: string): (string | HTMLAnchorElement)[] {
+  return text
+    .split(/(https?:\/\/\S+)/)
+    .map((part, i) =>
+      i % 2
+        ? h(
+            "a",
+            {
+              class: "textview-link",
+              href: part,
+              target: "_blank",
+              rel: "noopener noreferrer",
+            },
+            part,
+          )
+        : part,
+    )
+    .filter((part) => part !== "");
+}
+
 export type PowerMode = "restart" | "shutdown";
 
 interface Shortcut {
@@ -153,7 +174,11 @@ export function buildDesktop(
         },
         (body) =>
           body.append(
-            h("pre", { class: "textview-text", tabindex: "0" }, text),
+            h(
+              "pre",
+              { class: "textview-text", tabindex: "0" },
+              ...linkify(text),
+            ),
           ),
         { x: 140 + index * 28, y: 40 + index * 28 },
       ),
@@ -168,7 +193,7 @@ export function buildDesktop(
   // BEGIN SHIFT there starts the calibration.
   const openKnightsEye = () => open("desktop");
   const shortcuts: Shortcut[] = [
-    { label: "Gaze Setup", icon: "gaze", open: openKnightsEye },
+    { label: "Knight's Eye", icon: "gaze", open: openKnightsEye },
     { label: "Watch Station", icon: "watch", open: () => open("watch") },
     { label: "Last Debrief", icon: "debrief", open: openLastDebrief },
     ...fileOpeners.map(([label, run]) => ({
@@ -574,7 +599,7 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
           h(
             "div",
             { class: "menu-logo" },
-            h("span", { class: "menu-eye", "aria-hidden": "true" }),
+            icon(ICONS.eye, "menu-eye"),
             h("h1", { class: "pixel-title menu-title" }, "KNIGHT'S EYE"),
           ),
           h("p", { class: "menu-tagline" }, "TRAIN YOUR ATTENTION"),

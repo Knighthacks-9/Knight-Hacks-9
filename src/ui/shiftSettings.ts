@@ -7,10 +7,10 @@ export type Rate = "low" | "normal" | "high";
 export type DistractionRate = "off" | Rate;
 
 /**
- * When an effect on a person doing an anomaly shows: per the difficulty
- * level, for the whole anomaly, for its first seconds, or never.
+ * When an effect on a person doing an anomaly shows: for the whole anomaly,
+ * for its first seconds, or never.
  */
-export type AuraMode = "auto" | "always" | "timed" | "off";
+export type AuraMode = "always" | "timed" | "off";
 
 export interface ShiftSettings {
   /**
@@ -18,10 +18,10 @@ export interface ShiftSettings {
    * runs the difficulty's own preset and ignores the fields below.
    */
   custom: boolean;
-  /** Feeds on screen; null follows the difficulty level. */
-  cameraCount: number | null;
-  /** Anomalies in the shift; null follows the difficulty level. */
-  anomalies: number | null;
+  /** Feeds on screen. */
+  cameraCount: number;
+  /** Anomalies in the shift. */
+  anomalies: number;
   /** How fast ordinary people walk in, and how crowded the building gets. */
   npcRate: Rate;
   /** How often pop-ups cover the feeds. */
@@ -42,15 +42,15 @@ export interface ShiftSettings {
 
 export const DEFAULT_SHIFT_SETTINGS: ShiftSettings = {
   custom: false,
-  cameraCount: null,
-  anomalies: null,
+  cameraCount: 4,
+  anomalies: 5,
   npcRate: "normal",
   distractions: "normal",
   glitches: true,
   reportCounter: true,
-  highlight: "auto",
-  highlightSeconds: 3,
-  aura: "auto",
+  highlight: "timed",
+  highlightSeconds: 2,
+  aura: "off",
   auraSeconds: 3,
 };
 
@@ -60,12 +60,7 @@ export const MIN_ANOMALIES = 1;
 export const MAX_ANOMALIES = 12;
 export const MIN_AURA_SECONDS = 1;
 export const MAX_AURA_SECONDS = 15;
-export const AURA_MODES: readonly AuraMode[] = [
-  "auto",
-  "always",
-  "timed",
-  "off",
-];
+export const AURA_MODES: readonly AuraMode[] = ["always", "timed", "off"];
 export const RATES: readonly Rate[] = ["low", "normal", "high"];
 export const DISTRACTION_RATES: readonly DistractionRate[] = ["off", ...RATES];
 
@@ -108,14 +103,14 @@ export function sanitizeShiftSettings(value: unknown): ShiftSettings {
     custom: v.custom === true,
     cameraCount: (CAMERA_OPTIONS as readonly unknown[]).includes(v.cameraCount)
       ? (v.cameraCount as number)
-      : null,
+      : d.cameraCount,
     anomalies:
       typeof v.anomalies === "number" && Number.isFinite(v.anomalies)
         ? Math.min(
             MAX_ANOMALIES,
             Math.max(MIN_ANOMALIES, Math.round(v.anomalies)),
           )
-        : null,
+        : d.anomalies,
     npcRate: RATES.includes(v.npcRate as Rate)
       ? (v.npcRate as Rate)
       : d.npcRate,
@@ -154,28 +149,41 @@ export function isCustomized(settings: ShiftSettings): boolean {
   return settings.custom;
 }
 
-/** Crowd, pop-ups, glitches and report counter each difficulty starts from. */
+/**
+ * Crowd, pop-ups, glitches, report counter and anomaly effects each
+ * difficulty starts from. The effects mirror the level's own: a steady tint
+ * on Easy, a 2s / 1s flash on Normal / Hard, and embers on Hard.
+ */
 const LEVEL_PRESETS: Record<
   number,
-  Pick<ShiftSettings, "npcRate" | "distractions" | "glitches" | "reportCounter">
+  Omit<ShiftSettings, "custom" | "cameraCount" | "anomalies" | "auraSeconds">
 > = {
   1: {
     npcRate: "low",
     distractions: "low",
     glitches: false,
     reportCounter: true,
+    highlight: "always",
+    highlightSeconds: 2,
+    aura: "off",
   },
   2: {
     npcRate: "normal",
     distractions: "normal",
     glitches: true,
     reportCounter: false,
+    highlight: "timed",
+    highlightSeconds: 2,
+    aura: "off",
   },
   3: {
     npcRate: "high",
     distractions: "high",
     glitches: true,
     reportCounter: false,
+    highlight: "timed",
+    highlightSeconds: 1,
+    aura: "always",
   },
 };
 
@@ -198,6 +206,17 @@ export function effectiveSettings(
 }
 
 /**
+ * Switches to Custom starting from the options currently in force, so
+ * nothing on screen changes until the player changes it.
+ */
+export function toCustom(
+  level: LevelConfig,
+  settings: ShiftSettings,
+): ShiftSettings {
+  return { ...effectiveSettings(level, settings), custom: true };
+}
+
+/**
  * The player's choice for one anomaly effect, for the feed renderer: on for
  * the whole anomaly (Infinity), for its first `seconds`, or never (0).
  */
@@ -205,8 +224,7 @@ export interface AuraOverride {
   seconds: number;
 }
 
-function override(mode: AuraMode, seconds: number): AuraOverride | null {
-  if (mode === "auto") return null;
+function override(mode: AuraMode, seconds: number): AuraOverride {
   return {
     seconds: mode === "always" ? Infinity : mode === "timed" ? seconds : 0,
   };
@@ -219,9 +237,9 @@ export interface ShiftPlan {
   glitches: boolean;
   /** Show the sightings count and meter in the Watch Station. */
   reportCounter: boolean;
-  /** Red sprite tint; null keeps the level's own. */
+  /** Red sprite tint; null (a difficulty preset) keeps the level's own. */
   highlight: AuraOverride | null;
-  /** Rising embers; null keeps the level's own. */
+  /** Rising embers; null (a difficulty preset) keeps the level's own. */
   aura: AuraOverride | null;
 }
 
@@ -235,18 +253,21 @@ export function planShift(
   return {
     config: {
       level: level.level,
-      cameraCount: (settings.cameraCount ??
-        level.cameraCount) as LevelConfig["cameraCount"],
-      expectedAnomalies: settings.anomalies ?? level.expectedAnomalies,
+      cameraCount: settings.cameraCount as LevelConfig["cameraCount"],
+      expectedAnomalies: settings.anomalies,
       durationSeconds,
-      // Only a count the player typed in is exact; presets keep the level's.
-      fixedAnomalies: chosen.custom && chosen.anomalies !== null,
+      // Only a count the player set is exact; presets keep the level's.
+      fixedAnomalies: chosen.custom,
       npcSpawnRate: NPC_SPAWN_RATE[settings.npcRate],
     },
     distractionFrequency: DISTRACTION_FREQUENCY[settings.distractions],
     glitches: settings.glitches,
     reportCounter: settings.reportCounter,
-    highlight: override(settings.highlight, settings.highlightSeconds),
-    aura: override(settings.aura, settings.auraSeconds),
+    // Presets keep the renderer's per-level effects (the Normal and Hard
+    // flash is not a steady tint); Custom applies the player's choices.
+    highlight: chosen.custom
+      ? override(settings.highlight, settings.highlightSeconds)
+      : null,
+    aura: chosen.custom ? override(settings.aura, settings.auraSeconds) : null,
   };
 }
