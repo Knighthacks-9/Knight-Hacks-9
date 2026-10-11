@@ -3157,6 +3157,26 @@ body.nw {
     inset -1px -1px 0 #fff;
 }
 
+/* A difficulty preset is selected: its options are shown but not editable. */
+.setup-rows.is-locked .is-lockable .setup-label,
+.setup-rows.is-locked .is-lockable .setup-note {
+  color: var(--lo);
+}
+
+.setup-rows.is-locked .is-lockable .menu-shift-value {
+  opacity: 0.6;
+}
+
+.setup button:disabled {
+  color: var(--lo);
+  cursor: default;
+}
+
+.setup-option[aria-pressed="true"]:disabled {
+  background: #7d879a;
+  color: #e8ebe6;
+}
+
 .setup-note {
   grid-column: 2;
   margin: 0;

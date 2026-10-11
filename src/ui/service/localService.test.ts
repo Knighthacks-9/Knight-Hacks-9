@@ -34,11 +34,11 @@ describe("local NightwatchService", () => {
     globalThis.localStorage = memoryStorage();
   });
 
-  it("maps levels to 4, 6 and 6 real cameras", async () => {
+  it("maps levels to 2, 4 and 6 real cameras", async () => {
     const service = createLocalNightwatchService(mitt<AppEvents>());
     for (const [level, count] of [
-      [1, 4],
-      [2, 6],
+      [1, 2],
+      [2, 4],
       [3, 6],
     ]) {
       const cameras = await service.getCameras(level);
@@ -62,7 +62,7 @@ describe("local NightwatchService", () => {
     bus.on("flag:created", (flag) => flags.push(flag));
 
     const session = await service.startShift({
-      ...levelConfig(1),
+      ...levelConfig(2),
       durationSeconds: 120,
     });
     expect(session.cameras.map((c) => c.id)).toEqual([
