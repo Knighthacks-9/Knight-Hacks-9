@@ -1,7 +1,12 @@
 // Turns the analytics ShiftReport plus UI-only telemetry into the debrief.
 // Pure, so it can be tested without a DOM.
 import { attentionSpans, type ShiftSummary } from "../../analytics";
-import type { GazeSegment, ShiftReport } from "../../shared/types";
+import type {
+  ClassifiedEvent,
+  GazeSegment,
+  ShiftReport,
+  SuspiciousBehavior,
+} from "../../shared/types";
 import type {
   CameraFeed,
   FeedAttention,
@@ -166,7 +171,10 @@ export function buildShiftResult(input: ShiftResultInput): ShiftResult {
     timeline: buildTimeline(report, cameras, telemetry.popupGaze),
     coaching: [],
   };
-  result.coaching = coachingNotes(result);
+  result.coaching = [
+    ...coachingNotes(result),
+    ...missedAnomalyNotes(report, cameras),
+  ];
   return result;
 }
 
@@ -228,6 +236,60 @@ function buildTimeline(
     reports: [],
   });
   return rows;
+}
+
+/** Coaching lines that name a missed anomaly start with this. */
+export const MISSED_PREFIX = "MISSED: ";
+/** At most this many missed anomalies are listed one by one. */
+const MAX_MISSED_NOTES = 6;
+
+const BEHAVIOR_LABEL: Record<SuspiciousBehavior, string> = {
+  loitering: "Loitering",
+  revisitingDoors: "Revisiting doors",
+  restrictedZone: "Entering a restricted room",
+  avoidingCameras: "Avoiding the cameras",
+};
+
+const clock = (seconds: number) => {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** One line per anomaly the player did not report: what, where, when, why. */
+export function missedAnomalyNotes(
+  report: ShiftReport,
+  cameras: Pick<CameraFeed, "id" | "label" | "location">[],
+): string[] {
+  const missed = report.events
+    .filter((e) => e.outcome !== "caught")
+    .sort((a, b) => a.start - b.start);
+  const describe = (event: ClassifiedEvent) => {
+    // Only feeds that were on screen this shift.
+    const shown = cameras.filter((c) => event.cameraIds.includes(c.id));
+    const where = shown.length
+      ? `on ${shown.map((c) => `${c.label} ${c.location}`).join(" and ")}`
+      : "outside your feeds";
+    const when =
+      event.end === null
+        ? `from ${clock(event.start)}`
+        : `at ${clock(event.start)}-${clock(event.end)}`;
+    const watched = Math.round(event.watchedSeconds);
+    const why =
+      event.outcome === "missed-looking"
+        ? `You watched it for ${Math.max(1, watched)}s but did not report it.`
+        : shown.length
+          ? "You were not looking at that feed."
+          : "No camera you had on screen showed it.";
+    return `${MISSED_PREFIX}${BEHAVIOR_LABEL[event.behavior]} ${where} ${when}. ${why}`;
+  };
+  const notes = missed.slice(0, MAX_MISSED_NOTES).map(describe);
+  const rest = missed.length - notes.length;
+  if (rest > 0) {
+    notes.push(
+      `${MISSED_PREFIX}${rest} more ${rest === 1 ? "anomaly" : "anomalies"}. See the timeline.`,
+    );
+  }
+  return notes;
 }
 
 /** Two or three short, specific recommendations. */

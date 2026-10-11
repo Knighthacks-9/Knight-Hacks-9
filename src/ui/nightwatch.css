@@ -2726,6 +2726,11 @@ body.nw {
   margin: 0 0 4px;
 }
 
+/* A specific anomaly the player missed. */
+.db-coach p.is-missed {
+  color: var(--amber-text);
+}
+
 .db-actions {
   display: flex;
   justify-content: flex-end;
