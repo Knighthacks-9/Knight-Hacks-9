@@ -1,5 +1,6 @@
 // SHIFT_SETUP.CFG: a floating window where the player customizes the next
-// shift (difficulty, timer, cameras, crowd, anomalies, distractions).
+// shift (difficulty, timer, cameras, crowd, anomalies, distractions), plus an
+// ADVANCED section for the report window.
 import { playSfx } from "../../audio";
 import {
   MAX_SHIFT_SECONDS,
@@ -17,14 +18,16 @@ import {
   DEFAULT_SHIFT_SETTINGS,
   DISTRACTION_RATES,
   MAX_ANOMALIES,
-  MAX_AURA_SECONDS,
+  MAX_REPORT_WINDOW,
   MIN_ANOMALIES,
-  MIN_AURA_SECONDS,
+  MIN_REPORT_WINDOW,
   RATES,
   effectiveSettings,
   isCustomized,
   planShift,
   saveShiftSettings,
+  stepAuraSeconds,
+  toCustom,
 } from "../shiftSettings";
 import { bringToFront, openFloatingWindow } from "../window";
 
@@ -39,9 +42,9 @@ const DIFFICULTY = ["EASY", "NORMAL", "HARD"];
 /** Difficulty choice that unlocks every other option. */
 const CUSTOM = "custom";
 const DIFFICULTY_NOTE = [
-  "Anomalies stay tinted red.",
-  "Anomalies flash red for 2 seconds, then blend in.",
-  "Anomalies flash red for 1 second, then blend in.",
+  "Suspects glow faint green while they act.",
+  "Suspects flash green for 1 second each time they act.",
+  "Suspects flash red for 1 second each time they act, with pale embers.",
 ];
 
 let openWindow: { root: HTMLElement; destroy(): void } | null = null;
@@ -64,11 +67,20 @@ export function openShiftSetup(ctx: AppContext): void {
     notifyShiftSettings(ctx);
   };
 
-  /** A difficulty preset is in force: the options below it are read-only. */
+  /** A difficulty preset is in force: the options below it are greyed out. */
   const locked = () => !state.settings.custom;
   /** What the controls show: the player's options, or the preset's. */
   const view = () =>
     effectiveSettings(levelConfig(state.level), state.settings);
+  /**
+   * Switches to Custom from the preset on screen, before a greyed-out
+   * option applies. Returns true if it switched.
+   */
+  const unlock = (lockable: boolean) => {
+    if (!lockable || !locked()) return false;
+    state.settings = toCustom(levelConfig(state.level), state.settings);
+    return true;
+  };
 
   function row(
     label: string,
@@ -102,7 +114,8 @@ export function openShiftSetup(ctx: AppContext): void {
           type: "button",
           class: "btn95 setup-option",
           onclick: () => {
-            if (get() === value) return;
+            const unlocked = unlock(lockable);
+            if (get() === value && !unlocked) return;
             set(value);
             changed();
           },
@@ -113,7 +126,6 @@ export function openShiftSetup(ctx: AppContext): void {
     refreshers.push(() =>
       buttons.forEach((button, i) => {
         button.setAttribute("aria-pressed", String(options[i][0] === get()));
-        button.disabled = lockable && locked();
       }),
     );
     return h("div", { class: "setup-choice" }, ...buttons);
@@ -130,25 +142,23 @@ export function openShiftSetup(ctx: AppContext): void {
       class: "menu-shift-value",
       "aria-live": "polite",
     });
-    const buttons: HTMLButtonElement[] = [];
     refreshers.push(() => {
       value.textContent = text();
-      for (const b of buttons) b.disabled = lockable && locked();
     });
-    const button = (dir: number, glyph: string, label: string) => {
-      const b = h(
+    const button = (dir: number, glyph: string, label: string) =>
+      h(
         "button",
         {
           type: "button",
           class: "btn95 btn-sq",
           "aria-label": `${label} ${name}`,
-          onclick: () => changed(step(dir) ? "blip" : "deny"),
+          onclick: () => {
+            const unlocked = unlock(lockable);
+            changed(step(dir) || unlocked ? "blip" : "deny");
+          },
         },
         glyph,
       );
-      buttons.push(b);
-      return b;
-    };
     return h(
       "div",
       { class: "menu-shift" },
@@ -167,7 +177,7 @@ export function openShiftSetup(ctx: AppContext): void {
    */
   function effect(
     label: string,
-    what: string,
+    what: () => string,
     mode: "highlight" | "aura",
     seconds: "highlightSeconds" | "auraSeconds",
   ): HTMLElement {
@@ -175,10 +185,7 @@ export function openShiftSetup(ctx: AppContext): void {
       `${label} time`,
       () => `${view()[seconds]}s`,
       (dir) => {
-        const next = Math.min(
-          MAX_AURA_SECONDS,
-          Math.max(MIN_AURA_SECONDS, state.settings[seconds] + dir),
-        );
+        const next = stepAuraSeconds(state.settings[seconds], dir);
         if (next === state.settings[seconds]) return false;
         state.settings[seconds] = next;
         return true;
@@ -189,13 +196,11 @@ export function openShiftSetup(ctx: AppContext): void {
       const value = view()[mode];
       length.hidden = value !== "timed";
       note.textContent =
-        value === "auto"
-          ? "Follows the difficulty."
-          : value === "always"
-            ? `${what} for as long as the anomaly lasts.`
-            : value === "timed"
-              ? `${what} for the first ${view()[seconds]}s of each anomaly.`
-              : `No ${label.toLowerCase()}.`;
+        value === "always"
+          ? `${what()} while they act suspicious.`
+          : value === "timed"
+            ? `${what()} for the first ${view()[seconds]}s each time they act.`
+            : `No ${label.toLowerCase()}.`;
     });
     return row(
       label,
@@ -217,8 +222,8 @@ export function openShiftSetup(ctx: AppContext): void {
     const level = levelConfig(state.level);
     const { config } = planShift(level, state.shiftSeconds, state.settings);
     difficultyNote.textContent = locked()
-      ? (DIFFICULTY_NOTE[level.level - 1] ?? "")
-      : `Set every option yourself. Auto options follow ${DIFFICULTY[level.level - 1]}.`;
+      ? `${DIFFICULTY_NOTE[level.level - 1] ?? ""} Change any option to switch to Custom.`
+      : "Set every option yourself.";
     rowsEl.classList.toggle("is-locked", locked());
     summary.textContent =
       `NEXT SHIFT: ${mmss(config.durationSeconds)} · ${config.cameraCount} cameras · ` +
@@ -236,9 +241,14 @@ export function openShiftSetup(ctx: AppContext): void {
         ],
         () => (state.settings.custom ? CUSTOM : state.level),
         (value) => {
-          // A level locks the options to its preset; Custom frees them.
-          state.settings.custom = value === CUSTOM;
-          if (value !== CUSTOM) state.level = value;
+          // A level locks the options to its preset; Custom frees them,
+          // starting from the preset that was on screen.
+          if (value === CUSTOM) {
+            state.settings = toCustom(levelConfig(state.level), state.settings);
+          } else {
+            state.settings.custom = false;
+            state.level = value;
+          }
         },
         false,
       ),
@@ -270,8 +280,8 @@ export function openShiftSetup(ctx: AppContext): void {
     ),
     row(
       "Cameras",
-      choice<number | null>(
-        [[null, "Auto"], ...CAMERA_OPTIONS.map((n) => [n, String(n)] as const)],
+      choice(
+        CAMERA_OPTIONS.map((n) => [n, String(n)] as const),
         () => view().cameraCount,
         (count) => (state.settings.cameraCount = count),
       ),
@@ -280,32 +290,35 @@ export function openShiftSetup(ctx: AppContext): void {
       "Anomalies",
       stepper(
         "anomalies",
-        () => String(view().anomalies ?? "AUTO"),
+        () => String(view().anomalies),
         (dir) => {
-          // AUTO sits below the minimum: 1 then "-" goes back to AUTO.
-          const current = state.settings.anomalies;
-          const next =
-            current === null
-              ? dir > 0
-                ? MIN_ANOMALIES
-                : null
-              : current + dir < MIN_ANOMALIES
-                ? null
-                : Math.min(MAX_ANOMALIES, current + dir);
-          if (next === current) return false;
+          const next = Math.min(
+            MAX_ANOMALIES,
+            Math.max(MIN_ANOMALIES, state.settings.anomalies + dir),
+          );
+          if (next === state.settings.anomalies) return false;
           state.settings.anomalies = next;
           return true;
         },
       ),
-      h("p", { class: "setup-note" }, "Auto follows the difficulty."),
+      h("p", { class: "setup-note" }, `${MIN_ANOMALIES} to ${MAX_ANOMALIES}.`),
     ),
+    // The tint is green on Easy and Normal, red on Hard (see feedRenderer).
     effect(
-      "Red highlight",
-      "Sprite tinted red",
+      "Highlight",
+      () =>
+        levelConfig(state.level).level >= 3
+          ? "Sprite tinted red"
+          : "Sprite tinted faint green",
       "highlight",
       "highlightSeconds",
     ),
-    effect("Anomaly aura", "Red embers rise", "aura", "auraSeconds"),
+    effect(
+      "Anomaly aura",
+      () => "Pale cyan embers rise",
+      "aura",
+      "auraSeconds",
+    ),
     row(
       "NPC spawn rate",
       choice(
@@ -351,7 +364,47 @@ export function openShiftSetup(ctx: AppContext): void {
     ),
   ];
 
-  const rowsEl = h("div", { class: "setup-rows" }, ...rows);
+  // Advanced: not part of any difficulty, so changing it keeps the preset.
+  const windowNote = h("p", { class: "setup-note" });
+  refreshers.push(() => {
+    const s = state.settings.reportWindowSeconds;
+    windowNote.textContent = `A report counts if the person was on that feed in the last ${s}s. Default ${DEFAULT_SHIFT_SETTINGS.reportWindowSeconds}s.`;
+  });
+  const advanced = h(
+    "details",
+    { class: "setup-advanced" },
+    h("summary", null, "ADVANCED"),
+    row(
+      "Report window",
+      stepper(
+        "report window",
+        () => `${state.settings.reportWindowSeconds}s`,
+        (dir) => {
+          const next = Math.min(
+            MAX_REPORT_WINDOW,
+            Math.max(
+              MIN_REPORT_WINDOW,
+              state.settings.reportWindowSeconds + dir,
+            ),
+          );
+          if (next === state.settings.reportWindowSeconds) return false;
+          state.settings.reportWindowSeconds = next;
+          return true;
+        },
+        false,
+      ),
+      windowNote,
+      false,
+    ),
+  );
+  // Open it when the player has moved off the default.
+  advanced.toggleAttribute(
+    "open",
+    state.settings.reportWindowSeconds !==
+      DEFAULT_SHIFT_SETTINGS.reportWindowSeconds,
+  );
+
+  const rowsEl = h("div", { class: "setup-rows" }, ...rows, advanced);
   const refresh = () => refreshers.forEach((run) => run());
   const close = () => {
     ctx.root.removeEventListener(SHIFT_SETTINGS_EVENT, refresh);

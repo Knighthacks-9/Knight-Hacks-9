@@ -15,7 +15,8 @@ export type SfxName =
   | "deny"
   | "send"
   | "talkOn"
-  | "talkOff";
+  | "talkOff"
+  | "attentionAlarm";
 
 interface Tone {
   /** Seconds after the effect starts. */
@@ -99,6 +100,20 @@ const EFFECTS: Record<SfxName, Tone[]> = {
   talkOff: [
     { at: 0, duration: 0.04, frequency: 2400, type: "square", gain: 0.12 },
     { at: 0.05, duration: 0.06, frequency: 1600, type: "square", gain: 0.12 },
+  ],
+  // Harsh klaxon when the player's eyes leave the feeds too long: rapid
+  // rising blasts of clashing sawtooth and square tones over a low buzz.
+  attentionAlarm: [
+    { at: 0, duration: 1.3, frequency: 110, type: "sawtooth", gain: 1 },
+    ...[0, 1, 2, 3, 4, 5, 6, 7].flatMap((i): Tone[] => {
+      const frequency = i % 2 ? 1000 : 1400;
+      const pulse = { at: i * 0.15, duration: 0.13, slideTo: frequency * 1.2 };
+      return [
+        { ...pulse, frequency, type: "sawtooth", gain: 1.4 },
+        // A semitone up, so the two grind against each other.
+        { ...pulse, frequency: frequency * 1.06, type: "square", gain: 1.4 },
+      ];
+    }),
   ],
 };
 

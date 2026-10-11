@@ -6,6 +6,7 @@ import type { DebriefInput } from "../../audio";
 import type {
   CameraDef,
   GazeSource,
+  KnightStatus,
   SuspiciousBehavior,
   Vec2,
   WorldMap,
@@ -42,6 +43,11 @@ export interface ShiftConfig extends LevelConfig {
   fixedAnomalies?: boolean;
   /** Multiplier on how fast ordinary people arrive. Defaults to 1. */
   npcSpawnRate?: number;
+  /**
+   * A report counts if the suspect was on that feed this many seconds ago or
+   * less. Defaults to the analytics FLAG_GRACE_SECONDS (5).
+   */
+  reportWindowSeconds?: number;
 }
 
 export interface AnomalyReport {
@@ -108,10 +114,19 @@ export interface ShiftSession {
   tick(dt: number): ShiftFrame;
   recordGaze(observation: GazeObservation): void;
   /**
-   * Dispatch caught this person: they stop, and are led out a few seconds
-   * later. Optional; a backend without a world can leave it out.
+   * Sends a knight after a report: to catch `npcId`, or to check the
+   * feed's area when the report pointed at nobody. Returns the knight's id,
+   * or null for a backend without a world.
    */
-  detain?(npcId: string): void;
+  dispatchKnight?(npcId: string | null, cameraId: string): string | null;
+  /** That knight's progress; null once they've left the building. */
+  knightStatus?(knightId: string): KnightStatus | null;
+  /**
+   * The watch is over at shift time t: nobody new walks in, and the shift is
+   * scored up to t, though tick() keeps the building moving while dispatch
+   * wraps up.
+   */
+  endWatch?(t: number): void;
 }
 
 /** A span of shift time, in seconds. */
@@ -170,11 +185,15 @@ export interface ShiftResult {
   /** Best earlier score on this level, or null if this was the first. */
   personalBest: number | null;
   caught: number;
+  /** Caught, but they got out before the knight arrived (a late report). */
+  escaped: number;
   totalAnomalies: number;
   expectedAnomalies: number;
   missed: number;
   missedWhileLooking: number;
   falseFlags: number;
+  /** Times the gaze left every feed long enough to sound the alarm. */
+  attentionLapses: number;
   reportsFiled: number;
   /** 0..100 */
   detectionRate: number;

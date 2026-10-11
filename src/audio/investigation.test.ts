@@ -12,6 +12,7 @@ import {
   type InvestigationLine,
   type Whereabouts,
 } from "./investigation";
+import type { KnightStatus } from "../shared/types";
 
 const TOTAL = STAGES.reduce((sum, s) => sum + STAGE_DELAYS[s], 0);
 
@@ -143,6 +144,120 @@ describe("InvestigationDesk", () => {
     expect(lines.map((l) => l.stage)).toEqual([...STAGES]);
     expect(lines.every((l) => l.case === suspectCase)).toBe(true);
     expect(desk.busy).toBe(false);
+  });
+
+  it("skips straight to the outcome when hurried after the shift", async () => {
+    const { desk, lines } = setup();
+    desk.start(suspectCase, 10);
+    await flush();
+    expect(lines.map((l) => l.stage)).toEqual(["acknowledged"]);
+    desk.hurry(11);
+    expect(desk.remainingLines).toBe(1);
+    desk.update(11);
+    await flush();
+    expect(lines.map((l) => l.stage)).toEqual(["acknowledged", "resolved"]);
+    // The unit never arrived, so the person is located for the outcome.
+    expect(lines[1].text).toBeTruthy();
+    expect(desk.busy).toBe(false);
+  });
+
+  it("stops being busy once destroyed", () => {
+    const { desk } = setup();
+    desk.start(suspectCase, 10);
+    desk.destroy();
+    expect(desk.busy).toBe(false);
+  });
+
+  describe("with a knight", () => {
+    /** A knight whose progress the test sets by hand. */
+    const knightSetup = (c: InvestigationCase = suspectCase) => {
+      const lines: InvestigationLine[] = [];
+      let status: KnightStatus | null = {
+        targetId: c.npcId,
+        phase: "en_route",
+        outcome: null,
+      };
+      const sent: InvestigationCase[] = [];
+      const desk = new InvestigationDesk({
+        shiftSeconds: 100,
+        locate: () => ({ camera: 4, location: "Storage" }),
+        deliver: (line) => lines.push(line),
+        write: async (_stage, _facts, template) => template,
+        unit: {
+          dispatch: (sentFor) => {
+            sent.push(sentFor);
+            return "knight1";
+          },
+          status: () => status,
+        },
+      });
+      const run = async (from: number, to: number) => {
+        for (let t = from; t <= to; t += 0.5) {
+          desk.update(t);
+          await flush();
+        }
+      };
+      return {
+        desk,
+        lines,
+        sent,
+        run,
+        set: (next: KnightStatus | null) => (status = next),
+      };
+    };
+
+    it("follows the knight instead of a timer", async () => {
+      const { desk, lines, sent, run, set } = knightSetup();
+      desk.start(suspectCase, 10);
+      expect(sent).toEqual([suspectCase]);
+      // However long the knight takes, there's no arrival until they arrive.
+      await run(10, 60);
+      expect(lines.map((l) => l.stage)).toEqual(["acknowledged", "en_route"]);
+      set({ targetId: "npc3", phase: "on_scene", outcome: "caught" });
+      await run(60, 62);
+      expect(lines.map((l) => l.stage)).toEqual([
+        "acknowledged",
+        "en_route",
+        "on_scene",
+        "resolved",
+      ]);
+      expect(lines[3].outcome).toBe("caught");
+      // Arrived where the person is now, not where they were reported.
+      expect(lines[2].text).toContain("Storage");
+      set(null); // led them out
+      await run(62, 63);
+      expect(lines.at(-1)?.stage).toBe("closed");
+      expect(desk.busy).toBe(false);
+    });
+
+    it("reports an escape and skips the arrival", async () => {
+      const { desk, lines, run, set } = knightSetup();
+      desk.start(suspectCase, 10);
+      await run(10, 20);
+      set({ targetId: "npc3", phase: "leaving", outcome: "escaped" });
+      await run(20, 22);
+      expect(lines.map((l) => l.stage)).toEqual([
+        "acknowledged",
+        "en_route",
+        "resolved",
+        "closed",
+      ]);
+      expect(lines[2].outcome).toBe("escaped");
+      expect(lines[2].text).toMatch(/got (out|away)|slipped out/);
+    });
+
+    it("waits for the outcome when hurried after the shift", async () => {
+      const { desk, lines, run, set } = knightSetup();
+      desk.start(suspectCase, 10);
+      await flush();
+      desk.hurry(11);
+      await run(11, 30);
+      expect(lines.map((l) => l.stage)).toEqual(["acknowledged"]);
+      set({ targetId: "npc3", phase: "on_scene", outcome: "caught" });
+      await run(30, 31);
+      expect(lines.map((l) => l.stage)).toEqual(["acknowledged", "resolved"]);
+      expect(desk.busy).toBe(false);
+    });
   });
 
   it("gives a log-it line instead of investigating at the end of the shift", async () => {

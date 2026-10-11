@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SHIFT_SETTINGS,
   MAX_ANOMALIES,
+  MAX_AURA_SECONDS,
+  MAX_REPORT_WINDOW,
   isCustomized,
   planShift,
   presetSettings,
   sanitizeShiftSettings,
+  stepAuraSeconds,
+  toCustom,
 } from "./shiftSettings";
 
 const LEVEL = { level: 2, cameraCount: 6, expectedAnomalies: 5 } as const;
@@ -59,7 +63,7 @@ describe("shift settings", () => {
     expect(plan("timed").aura).toEqual({ seconds: 5 });
     expect(plan("off").aura).toEqual({ seconds: 0 });
     // The two effects are set separately.
-    expect(plan("off").highlight).toBeNull();
+    expect(plan("off").highlight).toEqual({ seconds: 1 });
     expect(
       planShift(LEVEL, 120, {
         ...DEFAULT_SHIFT_SETTINGS,
@@ -67,7 +71,7 @@ describe("shift settings", () => {
         highlight: "timed",
         highlightSeconds: 8,
       }),
-    ).toMatchObject({ highlight: { seconds: 8 }, aura: null });
+    ).toMatchObject({ highlight: { seconds: 8 }, aura: { seconds: 0 } });
   });
 
   it("locks a difficulty to its preset until Custom is chosen", () => {
@@ -113,6 +117,17 @@ describe("shift settings", () => {
     expect(planShift(easy, 120, DEFAULT_SHIFT_SETTINGS).glitches).toBe(false);
   });
 
+  it("switches to Custom from the preset on screen", () => {
+    const hard = { level: 3, cameraCount: 6, expectedAnomalies: 8 } as const;
+    const custom = toCustom(hard, {
+      ...DEFAULT_SHIFT_SETTINGS,
+      npcRate: "low",
+    });
+    expect(custom).toEqual({ ...presetSettings(hard), custom: true });
+    // Already Custom: the player's options carry over unchanged.
+    expect(toCustom(hard, custom)).toEqual(custom);
+  });
+
   it("repairs stored values", () => {
     expect(sanitizeShiftSettings(null)).toEqual(DEFAULT_SHIFT_SETTINGS);
     expect(
@@ -122,11 +137,35 @@ describe("shift settings", () => {
         npcRate: "fast",
         distractions: "off",
         glitches: "yes",
+        highlight: "auto",
       }),
     ).toEqual({
       ...DEFAULT_SHIFT_SETTINGS,
       anomalies: MAX_ANOMALIES,
       distractions: "off",
     });
+  });
+
+  it("keeps the report window whatever the difficulty", () => {
+    expect(DEFAULT_SHIFT_SETTINGS.reportWindowSeconds).toBe(5);
+    const settings = { ...DEFAULT_SHIFT_SETTINGS, reportWindowSeconds: 9 };
+    // A preset keeps the player's window, and so does switching to Custom.
+    expect(planShift(LEVEL, 120, settings).config.reportWindowSeconds).toBe(9);
+    expect(toCustom(LEVEL, settings).reportWindowSeconds).toBe(9);
+    expect(
+      sanitizeShiftSettings({ reportWindowSeconds: 99 }).reportWindowSeconds,
+    ).toBe(MAX_REPORT_WINDOW);
+  });
+
+  it("steps effect lengths through 0.5s, then whole seconds", () => {
+    expect(DEFAULT_SHIFT_SETTINGS.highlightSeconds).toBe(1);
+    expect(stepAuraSeconds(1, -1)).toBe(0.5);
+    expect(stepAuraSeconds(0.5, -1)).toBe(0.5);
+    expect(stepAuraSeconds(0.5, 1)).toBe(1);
+    expect(stepAuraSeconds(1, 1)).toBe(2);
+    expect(stepAuraSeconds(MAX_AURA_SECONDS, 1)).toBe(MAX_AURA_SECONDS);
+    expect(sanitizeShiftSettings({ auraSeconds: 0.5 }).auraSeconds).toBe(0.5);
+    expect(sanitizeShiftSettings({ auraSeconds: 0.1 }).auraSeconds).toBe(0.5);
+    expect(sanitizeShiftSettings({ auraSeconds: 2.4 }).auraSeconds).toBe(2);
   });
 });

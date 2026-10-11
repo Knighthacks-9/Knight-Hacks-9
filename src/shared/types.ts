@@ -63,10 +63,46 @@ export interface NpcSnapshot {
   cameraIds: string[];
   /**
    * True while the NPC is mid suspicious behavior (between its
-   * world:suspiciousStart and world:suspiciousEnd). Feeds tint these people
-   * so anomalies are easier to spot.
+   * world:suspiciousStart and world:suspiciousEnd). Reports are scored
+   * against this window.
    */
   suspicious?: boolean;
+  /**
+   * True during the visible part of the behavior (stopping at a door, being
+   * in the Server Room, ...), not the walk to or from it. Feeds highlight
+   * people only while this is true.
+   */
+  acting?: boolean;
+  /** Who this is. Missing means an ordinary visitor. */
+  role?: "visitor" | "knight";
+  /** A knight caught this person; they're held, then led out. */
+  detained?: boolean;
+  /** Set on knights: the job they were sent on. */
+  knight?: KnightStatus;
+}
+
+/** How a knight's job ended. `nothing`: there was nobody to catch. */
+export type KnightOutcome = "caught" | "escaped" | "nothing";
+
+/** A knight sent after a report. */
+export interface KnightStatus {
+  /** Who they were sent for; null when the report pointed at nobody. */
+  targetId: string | null;
+  /**
+   * en_route: heading out. on_scene: reached the person (or the reported
+   * spot). leaving: the job is done and they're walking out.
+   */
+  phase: "en_route" | "on_scene" | "leaving";
+  outcome: KnightOutcome | null;
+}
+
+/** Payload of world:capture: a knight's job reached its outcome. */
+export interface CaptureEvent {
+  knightId: string;
+  /** The person sent for, or null when there was nobody. */
+  npcId: string | null;
+  t: number;
+  outcome: KnightOutcome;
 }
 
 export interface WorldSnapshot {
@@ -104,6 +140,12 @@ export interface ShiftStart {
   shiftSeconds: number;
   /** Cameras shown on screen this shift, in grid order. */
   cameraIds: string[];
+  /**
+   * A report counts if the suspect was on that feed this many seconds ago or
+   * less (and their behavior ended no longer ago). Defaults to
+   * FLAG_GRACE_SECONDS.
+   */
+  reportWindowSeconds?: number;
 }
 
 export interface ShiftEnd {
@@ -173,6 +215,11 @@ export interface ClassifiedEvent {
   /** Seconds the player spent looking at a feed that showed the NPC. */
   watchedSeconds: number;
   flaggedAt: number | null;
+  /**
+   * Reported, but they left the building before the knight reached them.
+   * Still "caught" (the player saw it); worth less in the score.
+   */
+  escaped: boolean;
   /** Incident type the player reported, if they reported this person. */
   reportedBehavior: SuspiciousBehavior | null;
   reportNote: string | null;
@@ -217,6 +264,8 @@ export interface ShiftReport {
   gazeDistance: GazeDistanceSample[];
   /** Seconds gaze came from the webcam tracker (the rest is mouse or none). */
   trackerSeconds: number;
+  /** Times the gaze stayed off every feed for ATTENTION_LAPSE_SECONDS. */
+  attentionLapses: number;
 }
 
 export type AppEvents = {
@@ -228,6 +277,7 @@ export type AppEvents = {
   "world:snapshot": WorldSnapshot;
   "world:suspiciousStart": WorldEvent;
   "world:suspiciousEnd": WorldEvent;
+  "world:capture": CaptureEvent;
   "gaze:sample": GazeSample;
   "flag:created": Flag;
   "radio:report": RadioReport;

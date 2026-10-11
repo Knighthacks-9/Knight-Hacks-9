@@ -19,6 +19,7 @@ function event(over: Partial<ClassifiedEvent>): ClassifiedEvent {
     outcome: "caught",
     watchedSeconds: 3,
     flaggedAt: 12,
+    escaped: false,
     reportedBehavior: null,
     reportNote: null,
     ...over,
@@ -42,6 +43,7 @@ function report(events: ClassifiedEvent[], falseFlags = 0): ShiftReport {
     timeline: [],
     gazeDistance: [],
     trackerSeconds: 0,
+    attentionLapses: 0,
   };
 }
 
@@ -57,6 +59,7 @@ describe("debriefInput", () => {
             cameraIds: ["cam9", "cam5"],
             outcome: "missed-not-looking",
             flaggedAt: null,
+            escaped: false,
           }),
           event({
             id: "c",
@@ -64,6 +67,7 @@ describe("debriefInput", () => {
             cameraIds: ["cam2"],
             outcome: "missed-looking",
             flaggedAt: null,
+            escaped: false,
           }),
         ],
         2,
@@ -114,6 +118,7 @@ describe("debriefFacts", () => {
           cameraIds: ["cam5"],
           outcome: "missed-not-looking",
           flaggedAt: null,
+          escaped: false,
         }),
         event({
           id: "b",
@@ -121,6 +126,7 @@ describe("debriefFacts", () => {
           cameraIds: ["cam2"],
           outcome: "missed-looking",
           flaggedAt: null,
+          escaped: false,
         }),
       ]),
       FEEDS,

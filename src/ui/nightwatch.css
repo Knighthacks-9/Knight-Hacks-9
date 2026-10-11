@@ -564,6 +564,7 @@ body.nw {
 }
 
 .menu-splash {
+  container-type: inline-size;
   padding: 34px 20px 28px;
   background:
     repeating-linear-gradient(
@@ -585,19 +586,21 @@ body.nw {
   gap: 18px;
 }
 
+/* The Knight's Eye helmet logo, scaled with the title; kept crisp as pixel art. */
 .menu-eye {
+  display: block;
   flex: none;
-  width: 34px;
-  height: 34px;
-  border: 3px solid var(--green-text);
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: inset 0 0 0 3px var(--screen);
+  width: clamp(32px, 14cqi, 84px);
+  height: clamp(32px, 14cqi, 84px);
+  image-rendering: pixelated;
 }
 
-.menu-title {
+/* Sized to the splash width (not the viewport) so logo + title always fit on
+   one line: 12 glyphs at ~1.04em each stays under ~70% of the splash. */
+.menu-splash .menu-title {
   margin: 0;
-  font-size: clamp(18px, 5.3vw, 40px);
+  font-size: min(36px, 5.6cqi);
+  white-space: nowrap;
 }
 
 .menu-tagline {
@@ -694,6 +697,15 @@ body.nw {
   white-space: pre-wrap;
   border: 2px solid;
   border-color: var(--lo) var(--hi) var(--hi) var(--lo);
+}
+
+.textview-link {
+  color: #0000ee;
+  text-decoration: underline;
+}
+
+.textview-link:visited {
+  color: #551a8b;
 }
 
 .msgbox {
@@ -1461,11 +1473,11 @@ body.nw {
   inset: 0;
 }
 
-.ws .rw-titlebar {
+.ws > .rw-titlebar {
   height: 30px;
 }
 
-.ws .rw-title {
+.ws > .rw-titlebar .rw-title {
   flex: none;
 }
 
@@ -1482,12 +1494,12 @@ body.nw {
   color: var(--amber-text);
 }
 
-.ws .tb-btn {
+.ws > .rw-titlebar .tb-btn {
   width: 24px;
   height: 22px;
 }
 
-.ws .tb-glyph {
+.ws > .rw-titlebar .tb-glyph {
   transform: translate(2px, 2px);
 }
 
@@ -1634,6 +1646,37 @@ body.nw {
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+/* Attention lapse: the gaze stayed off the feeds too long. */
+.ws-stage.is-attention-lost::after {
+  content: "ATTENTION LOST";
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 4px solid #e0412f;
+  color: #fff;
+  font-family: var(--font-pixel);
+  font-size: 18px;
+  text-shadow: 2px 2px 0 #5a0d06;
+  pointer-events: none;
+  animation: lapse-flash 0.22s steps(2) infinite;
+}
+
+@keyframes lapse-flash {
+  50% {
+    background: rgba(224, 65, 47, 0.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-stage.is-attention-lost::after {
+    animation: none;
+    background: rgba(224, 65, 47, 0.2);
+  }
 }
 
 .ws-grid {
@@ -2460,6 +2503,24 @@ body.nw {
   border-color: #d26b63 #3a0f0c #3a0f0c #d26b63;
 }
 
+/* Dispatch asked a question and is waiting for the answer. */
+.radio-talk.is-asked:not(.is-live) {
+  animation: talk-asked 1s steps(2) infinite;
+}
+
+@keyframes talk-asked {
+  50% {
+    background: #5f8a6c;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radio-talk.is-asked:not(.is-live) {
+    animation: none;
+    background: #5f8a6c;
+  }
+}
+
 .radio-btn-main {
   font-family: var(--font-pixel);
   font-size: 10px;
@@ -3016,7 +3077,7 @@ body.nw {
     letter-spacing: 0.08em;
   }
 
-  .ws .rw-title {
+  .ws > .rw-titlebar .rw-title {
     display: none;
   }
 
@@ -3308,24 +3369,11 @@ body.nw {
     inset -1px -1px 0 #fff;
 }
 
-/* A difficulty preset is selected: its options are shown but not editable. */
-.setup-rows.is-locked .is-lockable .setup-label,
-.setup-rows.is-locked .is-lockable .setup-note {
+/* A difficulty preset is selected: what it chose stays in full colour, and
+   the other choices are greyed out but still clickable (any click switches
+   the setup to Custom). */
+.setup-rows.is-locked .is-lockable button:not([aria-pressed="true"]) {
   color: var(--lo);
-}
-
-.setup-rows.is-locked .is-lockable .menu-shift-value {
-  opacity: 0.6;
-}
-
-.setup button:disabled {
-  color: var(--lo);
-  cursor: default;
-}
-
-.setup-option[aria-pressed="true"]:disabled {
-  background: #7d879a;
-  color: #e8ebe6;
 }
 
 .setup-note {
@@ -3343,6 +3391,17 @@ body.nw {
   border-color: #3a403b var(--hi) var(--hi) #3a403b;
   color: var(--lcd-ink);
   font-size: 20px;
+}
+
+.setup-advanced {
+  border-top: 2px groove var(--hi);
+  padding-top: 6px;
+}
+
+.setup-advanced > summary {
+  cursor: pointer;
+  font-size: 20px;
+  margin-bottom: 8px;
 }
 
 @media (max-width: 700px) {

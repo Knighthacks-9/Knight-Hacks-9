@@ -11,7 +11,7 @@ export const DEFAULT_SHIFT_SECONDS = 120;
 // The world shrinks its end-of-shift margins on short shifts, so events
 // still spread out even at the minimum.
 export const MIN_SHIFT_SECONDS = 30;
-export const MAX_SHIFT_SECONDS = 600;
+export const MAX_SHIFT_SECONDS = 3600;
 export const SHIFT_SECONDS_STEP = 30;
 const SHIFT_STORAGE_KEY = "night-watch:shift-seconds";
 
