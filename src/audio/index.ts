@@ -22,6 +22,7 @@ export {
   type InvestigationCase,
   type InvestigationLine,
   type InvestigationStage,
+  type InvestigationUnit,
   type Whereabouts,
 } from "./investigation";
 export {

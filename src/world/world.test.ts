@@ -2,6 +2,7 @@ import mitt from "mitt";
 import { describe, expect, it } from "vitest";
 import type {
   AppEvents,
+  CaptureEvent,
   WorldEvent,
   WorldMap,
   WorldSnapshot,
@@ -9,7 +10,7 @@ import type {
 import { startWorld } from "./index";
 import { buildMap, EXITS, idx, isWalkable } from "./map";
 import { findPath } from "./pathfinding";
-import { DETAIN_SECONDS } from "./sim";
+import { DETAIN_SECONDS, KNIGHT_GIVE_UP_SECONDS } from "./sim";
 
 describe("world map", () => {
   const map = buildMap();
@@ -194,5 +195,134 @@ describe("shift options", () => {
     expect(run({ spawnRate: 1.75 }).peak).toBeGreaterThan(
       run({ spawnRate: 0.5 }).peak,
     );
+  });
+});
+
+describe("acting", () => {
+  it("is only set during the visible part of a suspicious behavior", () => {
+    const bus = mitt<AppEvents>();
+    let sawWalkUp = false;
+    let sawActing = false;
+    let actingOutside = false;
+    bus.on("world:snapshot", (s) => {
+      for (const n of s.npcs) {
+        if (n.acting) sawActing = true;
+        if (n.acting && !n.suspicious) actingOutside = true;
+        if (n.suspicious && !n.acting) sawWalkUp = true;
+      }
+    });
+    const world = startWorld({
+      bus,
+      seed: 4,
+      shiftSeconds: 600,
+      anomalyCount: 0,
+    });
+    // Door checks have walks between stops; avoiding cameras a walk in.
+    world.spawnSuspicious("revisitingDoors");
+    world.spawnSuspicious("avoidingCameras");
+    const dt = 1 / 10;
+    for (let t = dt; t <= 120; t += dt) bus.emit("sim:tick", { dt, t });
+    world.stop();
+    expect(sawActing).toBe(true);
+    expect(sawWalkUp).toBe(true);
+    expect(actingOutside).toBe(false);
+  });
+});
+
+describe("knights", () => {
+  function setup(seed = 9) {
+    const bus = mitt<AppEvents>();
+    const captures: CaptureEvent[] = [];
+    let last: WorldSnapshot | undefined;
+    bus.on("world:capture", (e) => captures.push(e));
+    bus.on("world:snapshot", (s) => (last = s));
+    const world = startWorld({ bus, seed, shiftSeconds: 600, anomalyCount: 0 });
+    const dt = 1 / 10;
+    let t = 0;
+    const tick = (seconds: number) => {
+      for (let i = 0; i < seconds / dt; i++)
+        bus.emit("sim:tick", { dt, t: (t += dt) });
+    };
+    return { world, captures, tick, snapshot: () => last! };
+  }
+
+  it("catches a loiterer, holds them, and leads them out", () => {
+    const { world, captures, tick, snapshot } = setup();
+    world.stopSpawning();
+    const id = world.spawnSuspicious("loitering");
+    tick(20); // walk to the spot and start loitering
+    const knight = world.dispatchKnight({ npcId: id, spot: { x: 6, y: 18 } });
+    expect(world.knightStatus(knight)).toMatchObject({
+      phase: "en_route",
+      outcome: null,
+    });
+    tick(KNIGHT_GIVE_UP_SECONDS);
+    expect(captures).toEqual([
+      expect.objectContaining({
+        knightId: knight,
+        npcId: id,
+        outcome: "caught",
+      }),
+    ]);
+    const held = snapshot().npcs.find((n) => n.id === id);
+    // Either still held, or already led out of the building.
+    if (held) expect(held.detained).toBe(true);
+    tick(60);
+    expect(snapshot().npcs.some((n) => n.id === id)).toBe(false);
+    expect(world.knightStatus(knight)).toBeNull();
+    world.stop();
+  });
+
+  it("reports an escape when the person leaves before the knight arrives", () => {
+    const { world, captures, tick } = setup(2);
+    world.stopSpawning();
+    const id = world.spawnSuspicious("loitering");
+    // Reported far too late: the person has already walked out.
+    tick(200);
+    const late = world.dispatchKnight({ npcId: id, spot: { x: 6, y: 18 } });
+    tick(1);
+    expect(captures).toEqual([
+      expect.objectContaining({
+        knightId: late,
+        npcId: id,
+        outcome: "escaped",
+      }),
+    ]);
+    expect(world.knightStatus(late)).toMatchObject({ phase: "leaving" });
+    world.stop();
+  });
+
+  it("checks the spot and leaves when the report pointed at nobody", () => {
+    const { world, captures, tick } = setup();
+    world.stopSpawning();
+    const knight = world.dispatchKnight({
+      npcId: null,
+      spot: { x: 20, y: 12 },
+    });
+    tick(KNIGHT_GIVE_UP_SECONDS);
+    expect(captures).toEqual([
+      expect.objectContaining({
+        knightId: knight,
+        npcId: null,
+        outcome: "nothing",
+      }),
+    ]);
+    tick(60);
+    expect(world.knightStatus(knight)).toBeNull();
+    world.stop();
+  });
+
+  it("doesn't count knights toward the crowd", () => {
+    const { world, tick, snapshot } = setup();
+    for (let i = 0; i < 6; i++)
+      world.dispatchKnight({ npcId: null, spot: { x: 20, y: 12 } });
+    tick(1);
+    const knights = snapshot().npcs.filter((n) => n.role === "knight");
+    expect(knights).toHaveLength(6);
+    tick(10);
+    expect(
+      snapshot().npcs.filter((n) => n.role !== "knight").length,
+    ).toBeGreaterThan(0);
+    world.stop();
   });
 });

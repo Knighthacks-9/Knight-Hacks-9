@@ -160,7 +160,11 @@ export const mountDebrief: Screen = (ctx, params) => {
         stat(
           "ANOMALIES CAUGHT",
           `${r.caught} / ${r.totalAnomalies}`,
-          `${r.expectedAnomalies} expected this level`,
+          // Older saved debriefs have no escape count.
+          (r.escaped ?? 0) > 0
+            ? `${r.escaped} escaped before the knight arrived`
+            : `${r.expectedAnomalies} expected this level`,
+          (r.escaped ?? 0) > 0 ? "warn" : "",
         ),
         stat(
           "DETECTION RATE",
@@ -313,6 +317,8 @@ function metrics(r: ShiftResult): HTMLElement {
     ["Longest focus streak", secs(r.longestFocusStreakMs)],
     ["Camera coverage", `${r.cameraCoveragePercent}%`],
     ["Feed switches", String(r.focusSwitches)],
+    // Older saved debriefs have no lapse count.
+    ["Attention lapses", String(r.attentionLapses ?? 0)],
     ["Focus mode used", `${r.focusModeUses}×`],
     ["Pop-ups displayed", String(r.popupsDisplayed)],
     ["Pop-ups dismissed", String(r.popupsDismissed)],
@@ -335,6 +341,7 @@ function metrics(r: ShiftResult): HTMLElement {
       "Missed anomalies",
       `${r.missed} (${r.missedWhileLooking} while watching)`,
     ],
+    ["Escaped (reported late)", String(r.escaped ?? 0)],
   ];
   return h(
     "dl",

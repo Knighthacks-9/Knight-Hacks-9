@@ -28,6 +28,10 @@ export interface RadioMessage {
   onStart?(): void;
   /** Called when it finishes playing. */
   onEnd?(): void;
+  /** Dropped unheard when the shift ends (e.g. a question nobody can answer). */
+  discardOnDrain?: boolean;
+  /** May be dropped unheard so dispatch signs off soon after the shift. */
+  optional?: boolean;
 }
 
 export interface RadioOptions {
@@ -56,6 +60,15 @@ function saveAutoPlay(on: boolean): void {
   }
 }
 
+/**
+ * Rough seconds a dispatcher line takes to arrive and be said (about 150
+ * words a minute, plus a second for the voice to load), for keeping the end
+ * of a shift on time.
+ */
+export function speechSeconds(text: string): number {
+  return 1 + text.split(/\s+/).filter(Boolean).length / 2.5;
+}
+
 /** True when some form of speech input could work in this browser. */
 export function voiceInputAvailable(): boolean {
   return voiceInputSupported();
@@ -77,6 +90,10 @@ export class DispatchRadio {
   private pressedAt = 0;
   private notice = "";
   private noticeTimer = 0;
+  /** Standing LCD line while dispatch waits on an answer. */
+  private prompt = "";
+  /** Bumped by cut(): transmissions from before it are dropped. */
+  private generation = 0;
   private waveTimer = 0;
   private destroyed = false;
   private readonly reduced = prefersReducedMotion();
@@ -208,9 +225,10 @@ export class DispatchRadio {
   /** Queues a dispatcher transmission; it arrives after a short delay. */
   receive(message: RadioMessage, delayMs = randomBetween(500, 900)): void {
     this.inbound += 1;
+    const generation = this.generation;
     window.setTimeout(() => {
       this.inbound -= 1;
-      if (this.destroyed) return;
+      if (this.destroyed || generation !== this.generation) return;
       this.queue.push({ ...message, arrivedAt: performance.now() });
       playSfx("blip");
       if (this.state === "idle") this.state = "incoming";
@@ -219,11 +237,43 @@ export class DispatchRadio {
     }, delayMs);
   }
 
-  /** Plays every waiting transmission, auto-play or not (the shift is over). */
-  drain(): void {
+  /** Estimated seconds of audio waiting to be played (see speechSeconds). */
+  get queuedSeconds(): number {
+    return this.queue.reduce((sum, m) => sum + speechSeconds(m.text), 0);
+  }
+
+  /**
+   * Plays every waiting transmission, auto-play or not (the shift is over).
+   * Optional ones are dropped, oldest first, until the rest fit in
+   * `budgetSeconds`.
+   */
+  drain(budgetSeconds = Infinity): void {
     this.draining = true;
+    this.queue = this.queue.filter((message) => !message.discardOnDrain);
+    while (this.queuedSeconds > budgetSeconds) {
+      const index = this.queue.findIndex((message) => message.optional);
+      if (index < 0) break;
+      this.queue.splice(index, 1);
+    }
+    if (this.state === "incoming" && !this.queue.length) this.state = "idle";
     this.render();
     this.autoPlayNext();
+  }
+
+  /**
+   * Drops every transmission still waiting or on its way. With
+   * `stopCurrent`, also cuts off the one playing (dispatch is out of time).
+   */
+  cut(stopCurrent: boolean): void {
+    if (this.destroyed) return;
+    this.generation += 1;
+    this.queue = [];
+    if (stopCurrent && this.current) {
+      this.current = null;
+      stopSpeaking();
+    }
+    if (!this.current && this.state !== "listening") this.state = "idle";
+    this.render();
   }
 
   setAutoPlay(on: boolean): void {
@@ -233,6 +283,16 @@ export class DispatchRadio {
     playSfx(on ? "select" : "cancel");
     this.render();
     this.autoPlayNext();
+  }
+
+  /**
+   * Shows a standing line on the LCD and flashes PUSH TO TALK, while dispatch
+   * waits for the player to answer a question. Empty clears it.
+   */
+  setPrompt(text: string): void {
+    if (this.destroyed || text === this.prompt) return;
+    this.prompt = text;
+    this.render();
   }
 
   /** Space bar push-to-talk (hold). */
@@ -284,7 +344,8 @@ export class DispatchRadio {
       .play()
       .catch(() => undefined)
       .then(() => {
-        if (this.destroyed) return;
+        // Cut off: cut() already moved the radio on.
+        if (this.destroyed || this.current !== next) return;
         next.onEnd?.();
         this.current = null;
         this.state = this.transmission
@@ -396,7 +457,7 @@ export class DispatchRadio {
           ? (this.current?.text ?? "")
           : listening
             ? "SPEAK NOW. RELEASE OR CLICK TO SEND."
-            : "");
+            : this.prompt);
 
     this.leds.link.classList.toggle("on", true);
     this.leds.rx.classList.toggle(
@@ -424,6 +485,7 @@ export class DispatchRadio {
     this.autoState.textContent = auto ? "ON" : "OFF";
 
     this.talkButton.classList.toggle("is-live", listening);
+    this.talkButton.classList.toggle("is-asked", this.prompt !== "");
     this.talkButton.setAttribute("aria-pressed", String(listening));
     this.talkButton.disabled = this.transcribing;
     (this.talkButton.firstChild as HTMLElement).textContent = this.transcribing

@@ -89,7 +89,7 @@ describe("fillLine", () => {
   it("picks the variant at the random index and fills it", () => {
     const slots = { CAM: "4", ROOM: "Office B" };
     expect(fillLine("en_route", slots, () => 0)).toBe(
-      "Unit en route to Office B, camera 4. Stand by.",
+      "Knight en route to Office B, camera 4. Stand by.",
     );
     expect(fillLine("en_route", slots, () => 0.99)).toBe(
       DEFAULT_LINES.en_route[2]

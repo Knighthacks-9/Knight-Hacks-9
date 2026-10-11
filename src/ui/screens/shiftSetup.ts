@@ -1,5 +1,6 @@
 // SHIFT_SETUP.CFG: a floating window where the player customizes the next
-// shift (difficulty, timer, cameras, crowd, anomalies, distractions).
+// shift (difficulty, timer, cameras, crowd, anomalies, distractions), plus an
+// ADVANCED section for the report window.
 import { playSfx } from "../../audio";
 import {
   MAX_SHIFT_SECONDS,
@@ -17,14 +18,15 @@ import {
   DEFAULT_SHIFT_SETTINGS,
   DISTRACTION_RATES,
   MAX_ANOMALIES,
-  MAX_AURA_SECONDS,
+  MAX_REPORT_WINDOW,
   MIN_ANOMALIES,
-  MIN_AURA_SECONDS,
+  MIN_REPORT_WINDOW,
   RATES,
   effectiveSettings,
   isCustomized,
   planShift,
   saveShiftSettings,
+  stepAuraSeconds,
   toCustom,
 } from "../shiftSettings";
 import { bringToFront, openFloatingWindow } from "../window";
@@ -40,9 +42,9 @@ const DIFFICULTY = ["EASY", "NORMAL", "HARD"];
 /** Difficulty choice that unlocks every other option. */
 const CUSTOM = "custom";
 const DIFFICULTY_NOTE = [
-  "Anomalies stay tinted red.",
-  "Anomalies flash red for 2 seconds, then blend in.",
-  "Anomalies flash red for 1 second, then blend in.",
+  "Suspects glow faint green while they act.",
+  "Suspects flash green for 1 second each time they act.",
+  "Suspects flash red for 1 second each time they act, with pale embers.",
 ];
 
 let openWindow: { root: HTMLElement; destroy(): void } | null = null;
@@ -175,7 +177,7 @@ export function openShiftSetup(ctx: AppContext): void {
    */
   function effect(
     label: string,
-    what: string,
+    what: () => string,
     mode: "highlight" | "aura",
     seconds: "highlightSeconds" | "auraSeconds",
   ): HTMLElement {
@@ -183,10 +185,7 @@ export function openShiftSetup(ctx: AppContext): void {
       `${label} time`,
       () => `${view()[seconds]}s`,
       (dir) => {
-        const next = Math.min(
-          MAX_AURA_SECONDS,
-          Math.max(MIN_AURA_SECONDS, state.settings[seconds] + dir),
-        );
+        const next = stepAuraSeconds(state.settings[seconds], dir);
         if (next === state.settings[seconds]) return false;
         state.settings[seconds] = next;
         return true;
@@ -198,9 +197,9 @@ export function openShiftSetup(ctx: AppContext): void {
       length.hidden = value !== "timed";
       note.textContent =
         value === "always"
-          ? `${what} for as long as the anomaly lasts.`
+          ? `${what()} while they act suspicious.`
           : value === "timed"
-            ? `${what} for the first ${view()[seconds]}s of each anomaly.`
+            ? `${what()} for the first ${view()[seconds]}s each time they act.`
             : `No ${label.toLowerCase()}.`;
     });
     return row(
@@ -304,13 +303,22 @@ export function openShiftSetup(ctx: AppContext): void {
       ),
       h("p", { class: "setup-note" }, `${MIN_ANOMALIES} to ${MAX_ANOMALIES}.`),
     ),
+    // The tint is green on Easy and Normal, red on Hard (see feedRenderer).
     effect(
-      "Red highlight",
-      "Sprite tinted red",
+      "Highlight",
+      () =>
+        levelConfig(state.level).level >= 3
+          ? "Sprite tinted red"
+          : "Sprite tinted faint green",
       "highlight",
       "highlightSeconds",
     ),
-    effect("Anomaly aura", "Red embers rise", "aura", "auraSeconds"),
+    effect(
+      "Anomaly aura",
+      () => "Pale cyan embers rise",
+      "aura",
+      "auraSeconds",
+    ),
     row(
       "NPC spawn rate",
       choice(
@@ -356,7 +364,47 @@ export function openShiftSetup(ctx: AppContext): void {
     ),
   ];
 
-  const rowsEl = h("div", { class: "setup-rows" }, ...rows);
+  // Advanced: not part of any difficulty, so changing it keeps the preset.
+  const windowNote = h("p", { class: "setup-note" });
+  refreshers.push(() => {
+    const s = state.settings.reportWindowSeconds;
+    windowNote.textContent = `A report counts if the person was on that feed in the last ${s}s. Default ${DEFAULT_SHIFT_SETTINGS.reportWindowSeconds}s.`;
+  });
+  const advanced = h(
+    "details",
+    { class: "setup-advanced" },
+    h("summary", null, "ADVANCED"),
+    row(
+      "Report window",
+      stepper(
+        "report window",
+        () => `${state.settings.reportWindowSeconds}s`,
+        (dir) => {
+          const next = Math.min(
+            MAX_REPORT_WINDOW,
+            Math.max(
+              MIN_REPORT_WINDOW,
+              state.settings.reportWindowSeconds + dir,
+            ),
+          );
+          if (next === state.settings.reportWindowSeconds) return false;
+          state.settings.reportWindowSeconds = next;
+          return true;
+        },
+        false,
+      ),
+      windowNote,
+      false,
+    ),
+  );
+  // Open it when the player has moved off the default.
+  advanced.toggleAttribute(
+    "open",
+    state.settings.reportWindowSeconds !==
+      DEFAULT_SHIFT_SETTINGS.reportWindowSeconds,
+  );
+
+  const rowsEl = h("div", { class: "setup-rows" }, ...rows, advanced);
   const refresh = () => refreshers.forEach((run) => run());
   const close = () => {
     ctx.root.removeEventListener(SHIFT_SETTINGS_EVENT, refresh);

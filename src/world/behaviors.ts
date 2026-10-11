@@ -6,10 +6,19 @@ import type { Rng } from "./rng";
  * An NPC follows a plan: a list of steps. Steps tagged with a behavior are
  * the suspicious window; the sim emits world:suspiciousStart when the first
  * tagged step begins and world:suspiciousEnd when the tagged run finishes.
+ * Tagged steps marked `act` are the moments the behavior shows on a feed
+ * (stopping at the door, being in the Server Room, ...). Feeds highlight
+ * people only then, so the walk to and from the spot looks ordinary.
  */
 export type Step =
-  | { kind: "walk"; to: Vec2; avoidCameras?: boolean; tag?: SuspiciousBehavior }
-  | { kind: "wait"; seconds: number; tag?: SuspiciousBehavior };
+  | {
+      kind: "walk";
+      to: Vec2;
+      avoidCameras?: boolean;
+      tag?: SuspiciousBehavior;
+      act?: true;
+    }
+  | { kind: "wait"; seconds: number; tag?: SuspiciousBehavior; act?: true };
 
 export interface Plan {
   spawn: Vec2;
@@ -80,9 +89,10 @@ export function suspiciousPlan(
         rng,
       );
       steps.push({ kind: "walk", to: spot });
+      // Hanging around the spot is the act, shuffles included.
       for (let i = 0; i < 3; i++) {
-        steps.push({ kind: "wait", seconds: rng.range(7, 11), tag });
-        steps.push({ kind: "walk", to: near(map, spot, rng), tag });
+        steps.push({ kind: "wait", seconds: rng.range(7, 11), tag, act: true });
+        steps.push({ kind: "walk", to: near(map, spot, rng), tag, act: true });
       }
       break;
     }
@@ -90,8 +100,14 @@ export function suspiciousPlan(
       const door = rng.pick(DOORS);
       const hall = room(map, "Hallway");
       steps.push({ kind: "walk", to: door });
+      // The act is each stop at the door, not the walks in between.
       for (let i = 0; i < 3; i++) {
-        steps.push({ kind: "wait", seconds: rng.range(1.5, 3), tag });
+        steps.push({
+          kind: "wait",
+          seconds: rng.range(1.5, 3),
+          tag,
+          act: true,
+        });
         steps.push({ kind: "walk", to: pointIn(map, hall, rng), tag });
         steps.push({ kind: "wait", seconds: rng.range(2, 4), tag });
         steps.push({ kind: "walk", to: door, tag });
@@ -99,21 +115,24 @@ export function suspiciousPlan(
       break;
     }
     case "restrictedZone": {
+      // Every tagged step is inside the Server Room, so all of it is the act.
       const serverDoor = DOORS[2];
       steps.push({ kind: "walk", to: serverDoor });
       steps.push({
         kind: "walk",
         to: pointIn(map, room(map, "Server Room"), rng),
         tag,
+        act: true,
       });
-      steps.push({ kind: "wait", seconds: rng.range(6, 10), tag });
+      steps.push({ kind: "wait", seconds: rng.range(6, 10), tag, act: true });
       steps.push({
         kind: "walk",
         to: pointIn(map, room(map, "Server Room"), rng),
         tag,
+        act: true,
       });
-      steps.push({ kind: "wait", seconds: rng.range(3, 6), tag });
-      steps.push({ kind: "walk", to: serverDoor, tag });
+      steps.push({ kind: "wait", seconds: rng.range(3, 6), tag, act: true });
+      steps.push({ kind: "walk", to: serverDoor, tag, act: true });
       break;
     }
     case "avoidingCameras": {
@@ -122,13 +141,16 @@ export function suspiciousPlan(
         room(map, rng.pick(["Office A", "Break Room", "Storage"])),
         rng,
       );
+      // The walk in looks like anyone arriving; lurking in the room and
+      // sneaking back out are the act.
       steps.push({ kind: "walk", to: target, avoidCameras: true, tag });
-      steps.push({ kind: "wait", seconds: rng.range(4, 8), tag });
+      steps.push({ kind: "wait", seconds: rng.range(4, 8), tag, act: true });
       steps.push({
         kind: "walk",
         to: rng.pick(EXITS),
         avoidCameras: true,
         tag,
+        act: true,
       });
       break;
     }

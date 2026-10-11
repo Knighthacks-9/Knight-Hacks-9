@@ -17,35 +17,40 @@ export const DEFAULT_LINES = {
     "Roger that, control. We have your report from {ROOM}, camera {CAM}.",
   ],
   en_route: [
-    "Unit en route to {ROOM}, camera {CAM}. Stand by.",
-    "Sending a unit to {ROOM} now. Keep eyes on camera {CAM}.",
-    "Unit moving to camera {CAM}, {ROOM}. Stand by, control.",
+    "Knight en route to {ROOM}, camera {CAM}. Stand by.",
+    "Sending the knight to {ROOM} now. Keep eyes on camera {CAM}.",
+    "Knight moving to camera {CAM}, {ROOM}. Stand by, control.",
   ],
   on_scene_still: [
-    "Unit on scene at {ROOM}. Eyes on the subject.",
-    "Unit has arrived at {ROOM}, camera {CAM}. Subject is still there.",
+    "Knight on scene at {ROOM}. Eyes on the subject.",
+    "Knight has arrived at {ROOM}, camera {CAM}. Subject is still there.",
     "We're on scene at {ROOM}. Subject in sight.",
   ],
   // {ROOM} is where the subject is now; {NEW_CAM} only when a feed shows them.
   on_scene_moved: [
-    "Unit on scene, but the subject moved to {ROOM}, camera {NEW_CAM}. Following.",
-    "Subject has relocated to camera {NEW_CAM}, {ROOM}. Unit is following.",
-    "Unit arrived, subject is gone from there. Last seen heading toward {ROOM}. Following.",
+    "Knight on scene, but the subject moved to {ROOM}, camera {NEW_CAM}. Following.",
+    "Subject has relocated to camera {NEW_CAM}, {ROOM}. Knight is following.",
+    "Knight arrived, subject is gone from there. Last seen heading toward {ROOM}. Following.",
   ],
   on_scene_gone: [
-    "Unit on scene at {ROOM}. Subject has left the monitored area.",
-    "Unit arrived at camera {CAM}, {ROOM}. Subject is out of the building view.",
+    "Knight on scene at {ROOM}. Subject has left the monitored area.",
+    "Knight arrived at camera {CAM}, {ROOM}. Subject is out of the building view.",
     "We're at {ROOM}, control. Subject has cleared the monitored area.",
   ],
   on_scene_nobody: [
-    "Unit on scene at {ROOM}. No one matching.",
-    "Unit checked camera {CAM}, {ROOM}. Nobody there fits the report.",
+    "Knight on scene at {ROOM}. No one matching.",
+    "Knight checked camera {CAM}, {ROOM}. Nobody there fits the report.",
     "We're at {ROOM}, control. Area is empty.",
   ],
   resolved_suspect: [
-    "Subject detained. Confirmed {BEHAVIOR}. Good call, control.",
+    "The knight has the subject. Confirmed {BEHAVIOR}. Good call, control.",
     "We have the subject in custody. They were {BEHAVIOR}. Nice catch.",
     "Subject detained for {BEHAVIOR}. Good eyes, control.",
+  ],
+  resolved_escaped: [
+    "Subject got out before the knight reached them. They were {BEHAVIOR}. Call it sooner next time.",
+    "Too late, control. The subject left the building. Confirmed {BEHAVIOR}, but they got away.",
+    "Knight missed them. Subject was {BEHAVIOR} and slipped out before we arrived.",
   ],
   resolved_innocent: [
     "False report. Subject checked out and has been cleared.",
@@ -55,7 +60,7 @@ export const DEFAULT_LINES = {
   resolved_nobody: [
     "False report. Nothing out of place at {ROOM}. Area cleared.",
     "Area at {ROOM} is clear. Nothing to report.",
-    "Unit swept {ROOM}. All clear, control.",
+    "Knight swept {ROOM}. All clear, control.",
   ],
   closed: [
     "Incident on camera {CAM} closed. Back to your feeds, control.",
@@ -63,8 +68,8 @@ export const DEFAULT_LINES = {
     "Camera {CAM} incident is closed. Eyes back on the monitors.",
   ],
   late: [
-    "Copy, control. Too late for a unit on camera {CAM}. Log it for the next crew.",
-    "No unit can reach {ROOM} before shift change. Log it for the next crew.",
+    "Copy, control. Too late for a knight on camera {CAM}. Log it for the next crew.",
+    "No knight can reach {ROOM} before shift change. Log it for the next crew.",
     "Camera {CAM} noted, control. Out of time tonight, so log it for the next crew.",
   ],
 
@@ -132,6 +137,7 @@ export const REQUIRED_SLOTS: Readonly<Record<LineId, readonly Placeholder[]>> =
     on_scene_gone: ["CAM", "ROOM"],
     on_scene_nobody: ["CAM", "ROOM"],
     resolved_suspect: ["BEHAVIOR"],
+    resolved_escaped: ["BEHAVIOR"],
     resolved_innocent: [],
     resolved_nobody: ["ROOM"],
     closed: ["CAM"],

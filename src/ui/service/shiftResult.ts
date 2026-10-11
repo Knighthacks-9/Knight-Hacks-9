@@ -1,6 +1,11 @@
 // Turns the analytics ShiftReport plus UI-only telemetry into the debrief.
 // Pure, so it can be tested without a DOM.
-import { attentionSpans, type ShiftSummary } from "../../analytics";
+import {
+  ATTENTION_LAPSE_PENALTY,
+  ATTENTION_LAPSE_SECONDS,
+  attentionSpans,
+  type ShiftSummary,
+} from "../../analytics";
 import type {
   ClassifiedEvent,
   GazeSegment,
@@ -70,6 +75,7 @@ export function buildShiftResult(input: ShiftResultInput): ShiftResult {
 
   const caughtEvents = report.events.filter((e) => e.outcome === "caught");
   const caught = caughtEvents.length;
+  const escaped = caughtEvents.filter((e) => e.escaped).length;
   const total = report.events.length;
   const missedWhileLooking = report.events.filter(
     (e) => e.outcome === "missed-looking",
@@ -134,11 +140,13 @@ export function buildShiftResult(input: ShiftResultInput): ShiftResult {
     grade: gradeFor(report.score),
     personalBest,
     caught,
+    escaped,
     totalAnomalies: total,
     expectedAnomalies: input.expectedAnomalies,
     missed: total - caught,
     missedWhileLooking,
     falseFlags,
+    attentionLapses: report.attentionLapses,
     reportsFiled,
     detectionRate: total ? Math.round((100 * caught) / total) : 0,
     falsePositiveRate: reportsFiled
@@ -312,6 +320,11 @@ export function coachingNotes(r: ShiftResult): string[] {
     );
   }
 
+  if (r.attentionLapses > 0) {
+    notes.push(
+      `Your eyes left the feeds ${r.attentionLapses} ${r.attentionLapses === 1 ? "time" : "times"} for ${ATTENTION_LAPSE_SECONDS}s or more (-${ATTENTION_LAPSE_PENALTY * r.attentionLapses} points). Keep your gaze on the cameras.`,
+    );
+  }
   if (r.popupReadingMs > 4000 || r.popupsDisplayed - r.popupsDismissed > 1) {
     notes.push(
       "Avoid lingering on investigation pop-ups during active anomaly windows. Close or move them aside.",
@@ -319,7 +332,7 @@ export function coachingNotes(r: ShiftResult): string[] {
   }
   if (r.falseFlags > r.caught) {
     notes.push(
-      "More false reports than catches. Confirm the change on the feed before reporting.",
+      "More false reports than catches. Make sure someone is acting suspicious before reporting.",
     );
   } else if (r.missedWhileLooking > 0) {
     notes.push(
@@ -330,7 +343,11 @@ export function coachingNotes(r: ShiftResult): string[] {
       "No anomalies were caught. Look for people loitering, revisiting doors, or entering restricted rooms.",
     );
   }
-  if (r.averageReportTimeMs !== null && r.averageReportTimeMs > 10000) {
+  if (r.escaped > 0) {
+    notes.push(
+      `${r.escaped} ${r.escaped === 1 ? "suspect" : "suspects"} got out before the knight arrived. Report as soon as you see the behavior.`,
+    );
+  } else if (r.averageReportTimeMs !== null && r.averageReportTimeMs > 10000) {
     notes.push(
       `Reports took ${Math.round(r.averageReportTimeMs / 1000)}s on average. Report as soon as behavior looks wrong.`,
     );

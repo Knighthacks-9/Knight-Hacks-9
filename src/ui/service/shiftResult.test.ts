@@ -44,6 +44,7 @@ const report: ShiftReport = {
       outcome: "caught",
       watchedSeconds: 6,
       flaggedAt: 14,
+      escaped: false,
       reportedBehavior: null,
       reportNote: null,
     },
@@ -57,6 +58,7 @@ const report: ShiftReport = {
       outcome: "missed-looking",
       watchedSeconds: 2,
       flaggedAt: null,
+      escaped: false,
       reportedBehavior: null,
       reportNote: null,
     },
@@ -88,6 +90,7 @@ const report: ShiftReport = {
   ],
   gazeDistance: [],
   trackerSeconds: 0,
+  attentionLapses: 0,
 };
 
 describe("buildShiftResult", () => {

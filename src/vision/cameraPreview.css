@@ -202,6 +202,17 @@
   stroke-width: 2;
 }
 
+/* Minimized: only the title bar and status line show. The feed leaves the
+   layout but stays rendered (transparent) so the video keeps decoding. */
+.cam-preview.is-collapsed .cam-preview-screen {
+  position: absolute;
+  top: 24px;
+  right: 2px;
+  left: 2px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* --- Status line ---------------------------------------------------------- */
 
 .cam-preview-status {

@@ -26,13 +26,14 @@ const BRIEFING: BriefingStep[] = [
     lines: [
       "You are the night operator. Monitor every camera feed.",
       "Look for people loitering, revisiting doors, entering",
-      "restricted rooms, or avoiding the cameras.",
+      "restricted rooms, or avoiding the cameras. On easier shifts",
+      "suspects glow green while they're doing it.",
     ],
   },
   {
     title: "YOUR EYES ARE THE CONTROLLER",
     lines: [
-      "Gaze Setup calibrates the webcam so KNIGHT'S EYE knows which",
+      "BEGIN SHIFT calibrates the webcam so KNIGHT'S EYE knows which",
       "feed you are looking at. No webcam? The mouse pointer stands",
       "in for your gaze.",
     ],
@@ -41,14 +42,25 @@ const BRIEFING: BriefingStep[] = [
     title: "REPORT A SIGHTING",
     lines: [
       "Press REPORT SIGHTING (or R), then click the feed where you",
-      "saw it. Number keys 1-9 pick a feed. ESC cancels.",
+      "see them, or press its number. Report while they're still on",
+      "that feed. Reporting nobody costs points. ESC cancels.",
+    ],
+  },
+  {
+    title: "SEND THE KNIGHT",
+    lines: [
+      "Every report sends a knight to catch the suspect. Report late",
+      "and they may leave the building first: it still counts, but",
+      "an escape costs you points.",
     ],
   },
   {
     title: "USE THE RADIO",
     lines: [
-      'Hold SPACE to talk to dispatch: "Camera 3, sighting".',
-      "Press UNMUTE DISPATCH to hear the replies.",
+      "Dispatch follows the knight on the radio. Press UNMUTE",
+      "DISPATCH or turn on AUTO-PLAY to listen. Hold SPACE to report",
+      'by voice: "Camera 3, sighting". Dispatch will also ask about',
+      "your feeds: answer the same way.",
     ],
   },
   {
@@ -56,13 +68,14 @@ const BRIEFING: BriefingStep[] = [
     lines: [
       "Pop-ups will cover your feeds and feeds will glitch.",
       "Drag pop-ups aside or close them. Keep watching.",
+      "Eyes off the feeds for 5 seconds sets off an alarm: points off.",
     ],
   },
   {
     title: "READ YOUR DEBRIEF",
     lines: [
       "When the shift ends, the debrief shows where your attention",
-      "went: what you caught, what you missed, and why.",
+      "went: what you caught, what got away, and why.",
     ],
   },
 ];
