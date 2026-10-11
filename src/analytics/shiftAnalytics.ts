@@ -1,4 +1,5 @@
 import type {
+  CaptureEvent,
   ClassifiedEvent,
   FeedStats,
   Flag,
@@ -12,13 +13,22 @@ import type {
   WorldEvent,
   WorldSnapshot,
 } from "../shared/types";
+import { ATTENTION_LAPSE_PENALTY, AttentionWatch } from "./attention";
 
-/** A flag this long after a behavior ends still counts as catching it. */
+/**
+ * Default report window: a flag this long after a behavior ends still counts
+ * as catching it. Shift Setup can change it (ShiftStart.reportWindowSeconds).
+ */
 export const FLAG_GRACE_SECONDS = 5;
 /** Watching the suspect at least this long, without flagging, is "missed while looking". */
 export const LOOKED_SECONDS = 1;
 /** Points taken off the score for each innocent person flagged. */
 export const FALSE_FLAG_PENALTY = 5;
+/**
+ * Share of a catch lost when the suspect got out before the knight reached
+ * them: the report was right, but too late.
+ */
+export const ESCAPED_LOSS = 0.5;
 /** Gaps between gaze samples longer than this (e.g. a paused tab) are not counted. */
 const MAX_SAMPLE_GAP = 0.5;
 /** Gaze-to-suspect distance is logged at most this often (4 Hz). */
@@ -33,6 +43,7 @@ interface OpenEvent {
   cameraIds: Set<string>;
   watchedSeconds: number;
   flaggedAt: number | null;
+  escaped: boolean;
   reportedBehavior: ClassifiedEvent["reportedBehavior"];
   reportNote: string | null;
 }
@@ -44,6 +55,7 @@ export interface ShiftAnalytics {
   recordEventStart(event: WorldEvent): void;
   recordEventEnd(event: WorldEvent): void;
   recordFlag(flag: Flag): void;
+  recordCapture(capture: CaptureEvent): void;
   endShift(end: ShiftEnd): ShiftReport;
 }
 
@@ -64,6 +76,8 @@ export function createShiftAnalytics(): ShiftAnalytics {
   let visibleOn = new Map<string, string[]>();
   let positions = new Map<string, Vec2>();
   let gazeDistance: GazeDistanceSample[] = [];
+  let grace = FLAG_GRACE_SECONDS;
+  let attention = new AttentionWatch();
 
   const shown = (cameraId: string) => shift.cameraIds.includes(cameraId);
   const openEvents = () =>
@@ -111,6 +125,8 @@ export function createShiftAnalytics(): ShiftAnalytics {
       visibleOn = new Map();
       positions = new Map();
       gazeDistance = [];
+      grace = start.reportWindowSeconds ?? FLAG_GRACE_SECONDS;
+      attention = new AttentionWatch();
     },
 
     recordSnapshot(snapshot) {
@@ -141,6 +157,7 @@ export function createShiftAnalytics(): ShiftAnalytics {
       }
 
       recordDistance(sample);
+      attention.update(sample);
 
       // Credit the time since the previous sample to what was watched then.
       const dt = previous ? sample.t - previous.t : 0;
@@ -166,6 +183,7 @@ export function createShiftAnalytics(): ShiftAnalytics {
         cameraIds: new Set(event.cameraIds.filter(shown)),
         watchedSeconds: 0,
         flaggedAt: null,
+        escaped: false,
         reportedBehavior: null,
         reportNote: null,
       });
@@ -183,7 +201,7 @@ export function createShiftAnalytics(): ShiftAnalytics {
         (event) =>
           event.npcId === flag.npcId &&
           flag.t >= event.start &&
-          (event.end === null || flag.t <= event.end + FLAG_GRACE_SECONDS),
+          (event.end === null || flag.t <= event.end + grace),
       );
       if (matches.some((event) => event.flaggedAt !== null)) return; // repeat click
       if (matches.length === 0) {
@@ -197,10 +215,19 @@ export function createShiftAnalytics(): ShiftAnalytics {
       }
     },
 
+    recordCapture(capture) {
+      if (capture.outcome !== "escaped" || !capture.npcId) return;
+      for (const event of events.values()) {
+        if (event.npcId === capture.npcId && event.flaggedAt !== null)
+          event.escaped = true;
+      }
+    },
+
     endShift(end) {
       const duration = Math.max(end.t, 0);
       const classified: ClassifiedEvent[] = [...events.values()]
-        .filter((event) => event.cameraIds.size > 0)
+        // People keep moving while dispatch wraps up; only the watch counts.
+        .filter((event) => event.cameraIds.size > 0 && event.start <= end.t)
         .map((event) => ({
           id: event.id,
           npcId: event.npcId,
@@ -216,6 +243,7 @@ export function createShiftAnalytics(): ShiftAnalytics {
                 : "missed-not-looking",
           watchedSeconds: round(event.watchedSeconds),
           flaggedAt: event.flaggedAt,
+          escaped: event.flaggedAt !== null && event.escaped,
           reportedBehavior: event.reportedBehavior,
           reportNote: event.reportNote,
         }));
@@ -234,9 +262,11 @@ export function createShiftAnalytics(): ShiftAnalytics {
       });
 
       const caught = classified.filter((e) => e.outcome === "caught").length;
+      const escaped = classified.filter((e) => e.escaped).length;
       const total = classified.length;
       // Catching nobody scores 0 (even if nobody suspicious appeared), ending
-      // early or not; otherwise it's the share caught minus false flags.
+      // early or not; otherwise it's the share caught (an escape is worth
+      // less) minus false flags and attention lapses.
       const score =
         caught === 0
           ? 0
@@ -244,8 +274,9 @@ export function createShiftAnalytics(): ShiftAnalytics {
               0,
               Math.min(
                 100,
-                Math.round((100 * caught) / total) -
-                  FALSE_FLAG_PENALTY * falseFlags.length,
+                Math.round((100 * (caught - ESCAPED_LOSS * escaped)) / total) -
+                  FALSE_FLAG_PENALTY * falseFlags.length -
+                  ATTENTION_LAPSE_PENALTY * attention.lapses,
               ),
             );
       const passed =
@@ -265,6 +296,7 @@ export function createShiftAnalytics(): ShiftAnalytics {
         timeline: timeline.map((segment) => ({ ...segment })),
         gazeDistance: gazeDistance.map((sample) => ({ ...sample })),
         trackerSeconds: round(trackerSeconds),
+        attentionLapses: attention.lapses,
       };
     },
   };

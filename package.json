@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "voice:generate": "node scripts/generate-voice.mjs"
+    "voice:generate": "node scripts/generate-voice.mjs",
+    "sprites:knight": "node scripts/knight-sheet.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.1.0",

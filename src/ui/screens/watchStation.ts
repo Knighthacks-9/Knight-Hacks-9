@@ -2,10 +2,17 @@
 // on the left (2 to 6 feeds, focus mode, report mode, pop-ups, glitches);
 // side console on the right (report control, dispatch radio, end shift).
 //
-// The feeds follow the dispatcher's script as each line is heard: the
-// reported person is MARKED, an officer appears on scene, and a caught
-// suspect is boxed as CAPTURED and held. When the shift ends the feeds
-// freeze and dispatch closes out every open call before the debrief.
+// Dispatch also checks in now and then with a question about the feeds, which
+// the player answers over push-to-talk (see ../watch/dispatchQuestions).
+//
+// Each report sends a knight into the building. A reported suspect is
+// MARKED right away and boxed as CAPTURED when the knight reaches them, on
+// the feeds, whether or not the player has the radio unmuted; dispatch
+// narrates the knight's progress. When the watch ends no one new walks in,
+// but the building keeps moving so knights can finish, and dispatch closes
+// out every open call before the debrief, signing off no more than
+// OVERRUN_LIMIT_S after the shift.
+import { ATTENTION_LAPSE_PENALTY, AttentionWatch } from "../../analytics";
 import {
   InvestigationDesk,
   dispatchText,
@@ -30,11 +37,24 @@ import {
   type ShiftTelemetry,
 } from "../service";
 import { planShift } from "../shiftSettings";
+import {
+  QuestionWindow,
+  TIMEOUT_REPLY,
+  feedCounts,
+  isSightingReport,
+  parseAnswer,
+  pickQuestion,
+} from "../watch/dispatchQuestions";
 import { DistractionManager } from "../watch/distractions";
 import { FeedRenderer, type PersonMark } from "../watch/feedRenderer";
 import { GlitchScheduler } from "../watch/glitch";
 import { createMinimap } from "../watch/minimap";
-import { DispatchRadio, type RadioMessage } from "../watch/radio";
+import {
+  DispatchRadio,
+  speechSeconds,
+  voiceInputAvailable,
+  type RadioMessage,
+} from "../watch/radio";
 import { parseCameraCommand } from "../watch/voiceCommand";
 import { createWindow } from "../window";
 
@@ -57,8 +77,8 @@ const STAGE_BADGES: Record<
   string
 > = {
   acknowledged: "DISPATCH · REPORT ACK",
-  en_route: "DISPATCH · UNIT EN ROUTE",
-  on_scene: "DISPATCH · UNIT ON SCENE",
+  en_route: "DISPATCH · KNIGHT EN ROUTE",
+  on_scene: "DISPATCH · KNIGHT ON SCENE",
   closed: "DISPATCH · CASE CLOSED",
   late: "DISPATCH · LOGGED",
 };
@@ -66,13 +86,30 @@ const STAGE_BADGES: Record<
 const MARK_TAGS: Record<PersonMark["kind"], string> = {
   marked: "MARKED",
   captured: "CAPTURED",
-  cleared: "CLEARED",
 };
 
 /** How long a closed case's badge stays on its feed. */
 const BADGE_LINGER_MS = 4000;
 /** After the shift, give up waiting on dispatch if nothing happens for this long. */
 const WRAP_UP_STALL_MS = 45_000;
+/** Dispatch's audio, sign-off included, ends at most this long after the shift. */
+const OVERRUN_LIMIT_S = 30;
+/**
+ * Room left for the line playing when dispatch stops queueing new ones, and
+ * a rough length for each outcome line still to come.
+ */
+const LINE_ALLOWANCE_S = 8;
+/** Shift seconds before dispatch's first check-in, and between check-ins. */
+const FIRST_QUESTION_AT = 25;
+const QUESTION_GAP: [number, number] = [40, 70];
+/** No new check-ins this close to the end of the shift. */
+const QUESTION_CUTOFF = 20;
+/** How long the player has to answer once the question has played. */
+const ANSWER_SECONDS = 20;
+/** How long the feeds flash red after an attention lapse. */
+const LAPSE_FLASH_MS = 1400;
+/** LCD line while dispatch waits for an answer. */
+const ANSWER_PROMPT = "DISPATCH ASKED YOU · HOLD SPACE TO ANSWER";
 
 interface FeedView {
   feed: CameraFeed;
@@ -108,7 +145,22 @@ export const mountWatchStation: Screen = (ctx, params) => {
   let wrapping = false;
   let completedShift = false;
   let signedOff = false;
+  /** When the shift's watch ended (performance.now()). */
+  let wrapStartedAt = 0;
+  /** Seconds the sign-off takes; it must start by OVERRUN_LIMIT_S minus this. */
+  const signOffSeconds = speechSeconds(dispatchText("shift_end")) + 0.6;
+  /** 0 on time, 1 queue dropped, 2 the line playing cut off too. */
+  let cutStage = 0;
   let lastDispatchProgress = 0;
+  /** Dispatch's open check-in question, if any. */
+  let question: {
+    window: QuestionWindow;
+    /** The player has started hearing it; feeds are being sampled. */
+    heard: boolean;
+    /** Shift time the answer is due; set once the question has played. */
+    due: number;
+  } | null = null;
+  let nextQuestionAt = FIRST_QUESTION_AT;
   /** Dispatch's marks on people, by NPC id. */
   const marks = new Map<string, PersonMark>();
   let lastSnapshot: WorldSnapshot | null = null;
@@ -116,6 +168,9 @@ export const mountWatchStation: Screen = (ctx, params) => {
   let reportMode = false;
   let focused: FeedView | null = null;
   let views: FeedView[] = [];
+  /** Same lapse rule analytics scores with, so the alarm matches the penalty. */
+  const attention = new AttentionWatch();
+  let lapseFlashTimer = 0;
   const telemetry: ShiftTelemetry = {
     reports: [],
     popupsDisplayed: 0,
@@ -224,7 +279,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   const help = h(
     "p",
     { class: "rc-help", hidden: true },
-    "Press REPORT SIGHTING (or R), then click the feed where something changed. Number keys 1–9 pick a feed. ESC cancels.",
+    `Press REPORT SIGHTING (or R), then click the feed where someone is acting suspicious. Number keys 1–${config.cameraCount} pick a feed. ESC cancels. A knight goes after them: report quickly, before they leave.`,
   );
   const reportPanel = panel(
     "REPORT CONTROL",
@@ -255,7 +310,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
     ),
     meter,
     reportButton,
-    h("p", { class: "rc-hint" }, "Use when anything in a feed changes."),
+    h("p", { class: "rc-hint" }, "Use when someone on a feed acts suspicious."),
     help,
   );
 
@@ -263,8 +318,9 @@ export const mountWatchStation: Screen = (ctx, params) => {
     onUnmute: (delay) => telemetry.unmuteDelaysMs.push(delay),
     onTranscript: (text, provider) => {
       eventBus.emit("radio:report", { text, t: shiftT, provider });
-      const n = parseCameraCommand(text, views.length);
       if (!session || finished || wrapping) return "SHIFT NOT ACTIVE";
+      if (question?.heard && !isSightingReport(text)) return answer(text);
+      const n = parseCameraCommand(text, views.length);
       if (n === null) return `"${text.toUpperCase()}" · CAMERA NOT RECOGNIZED`;
       void submit(views[n - 1], "voice", text);
       return `VOICE REPORT FILED: ${views[n - 1].feed.label}`;
@@ -272,12 +328,116 @@ export const mountWatchStation: Screen = (ctx, params) => {
   });
   const radioPanel = panel("AI DISPATCH RADIO", null, radio.root);
 
-  // Each filed report is investigated over the radio; the world decides the
-  // outcome, the AI dispatcher only words it. Every report gets the full
-  // investigation: the shift waits for dispatch to finish (see beginWrapUp).
+  // --- Dispatch check-ins -------------------------------------------------------
+  /** A short dispatcher transmission outside any investigation. */
+  function say(headline: string, text: string): void {
+    radio.receive({
+      headline,
+      text,
+      play: () => speak(text),
+      optional: true,
+    });
+  }
+
+  /** Asks a question about the feeds; graded as the player hears it. */
+  function ask(counts: number[]): void {
+    const asked = pickQuestion(viewFeeds(), counts);
+    const open = {
+      window: new QuestionWindow(asked, views.length),
+      heard: false,
+      due: Infinity,
+    };
+    question = open;
+    radio.receive({
+      headline: asked.headline,
+      text: asked.text,
+      play: () => speak(asked.text),
+      discardOnDrain: true,
+      onStart: () => {
+        open.heard = true;
+        open.window.observe(feedCounts(lastSnapshot, viewFeeds()));
+      },
+      onEnd: () => {
+        if (question !== open) return;
+        open.due = shiftT + ANSWER_SECONDS;
+        radio.setPrompt(ANSWER_PROMPT);
+      },
+    });
+  }
+
+  /** Grades the player's spoken answer; returns the LCD line. */
+  function answer(text: string): string {
+    const open = question!;
+    const parsed = parseAnswer(open.window.question, text, views.length);
+    if (!parsed) {
+      // Keep the question open and give them time to try again.
+      open.due = Math.max(open.due, shiftT + ANSWER_SECONDS / 2);
+      radio.receive({
+        headline: "SAY AGAIN",
+        text: dispatchText("say_again"),
+        play: () => sayDispatch("say_again"),
+        optional: true,
+      });
+      return `"${text.toUpperCase()}" · DISPATCH DIDN'T COPY`;
+    }
+    const verdict = open.window.grade(parsed);
+    closeQuestion();
+    say(
+      verdict.correct ? "CHECK-IN: COPY" : "CHECK-IN: NEGATIVE",
+      verdict.reply,
+    );
+    return `ANSWER SENT: "${text.toUpperCase()}"`;
+  }
+
+  function closeQuestion(): void {
+    question = null;
+    radio.setPrompt("");
+    const [min, max] = QUESTION_GAP;
+    nextQuestionAt = shiftT + min + Math.random() * (max - min);
+  }
+
+  /** Samples the feeds for an open question, times it out, or asks the next. */
+  function updateQuestions(t: number): void {
+    const counts = feedCounts(lastSnapshot, viewFeeds());
+    if (question) {
+      if (question.heard) question.window.observe(counts);
+      if (t > question.due) {
+        closeQuestion();
+        say("CHECK-IN: NO ANSWER", TIMEOUT_REPLY);
+      }
+      return;
+    }
+    if (
+      t >= nextQuestionAt &&
+      t < config.durationSeconds - QUESTION_CUTOFF &&
+      views.length > 0 &&
+      !radio.busy &&
+      !reportMode &&
+      voiceInputAvailable()
+    ) {
+      ask(counts);
+    }
+  }
+
+  function viewFeeds(): CameraFeed[] {
+    return views.map((v) => v.feed);
+  }
+
+  // Each filed report sends a knight and is narrated over the radio; the
+  // world decides the outcome (caught, escaped, nobody there), the AI
+  // dispatcher only words it. The shift waits for dispatch to finish (see
+  // beginWrapUp).
   const desk = new InvestigationDesk({
     shiftSeconds: config.durationSeconds,
     fitToShift: false,
+    unit: {
+      dispatch: (c) =>
+        session?.dispatchKnight?.(
+          c.npcId,
+          views[c.camera - 1]?.feed.id ?? "",
+        ) ?? null,
+      status: (id) => session?.knightStatus?.(id) ?? null,
+    },
     locate: (npcId) =>
       locateNpc(
         lastSnapshot,
@@ -294,6 +454,8 @@ export const mountWatchStation: Screen = (ctx, params) => {
           headline: `${STAGE_HEADLINES[line.stage]}: ${label}`,
           text: line.text,
           play: () => speak(line.text),
+          // The outcome always gets said; the rest can go if time is short.
+          optional: line.stage !== "resolved" && line.stage !== "late",
           onStart: () => {
             lastDispatchProgress = performance.now();
             view?.root.classList.add("is-radio");
@@ -499,6 +661,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
     view.root.classList.add("is-reported");
     window.setTimeout(() => view.root.classList.remove("is-reported"), 1800);
     setStatus(`REPORT SENT · ${view.feed.label}`);
+    if (receipt.suspect) marks.set(receipt.suspect.npcId, { kind: "marked" });
     desk.start(
       {
         camera: view.index + 1,
@@ -512,55 +675,45 @@ export const mountWatchStation: Screen = (ctx, params) => {
     );
   }
 
-  // --- Following the dispatcher's script --------------------------------------
-  /** Updates the feeds as the player hears each investigation line. */
-  function followScript(line: InvestigationLine): void {
-    const c = line.case;
-    const view = views[line.camera - 1];
-    const npc = c.npcId;
-    const mark = npc ? marks.get(npc) : undefined;
-    switch (line.stage) {
-      case "acknowledged":
-      case "late":
-        if (npc) marks.set(npc, { kind: "marked", unit: false });
-        break;
-      case "on_scene":
-        // The officer appears beside the subject (wherever they are now), or
-        // checks the reported area when there was nobody to point at.
-        if (mark) mark.unit = true;
-        else if (!npc) view?.renderer.setUnitOnScene(true);
-        break;
-      case "resolved":
-        if (npc && c.suspect) {
-          session?.detain?.(npc);
-          marks.set(npc, { kind: "captured", unit: true });
-          playSfx("send");
-        } else if (npc) {
-          marks.set(npc, { kind: "cleared", unit: true });
-        }
-        break;
-      case "closed":
-        // Cleared people go about their business; a captured suspect stays
-        // boxed until they're led out of view.
-        if (npc && mark?.kind === "cleared") marks.delete(npc);
-        view?.renderer.setUnitOnScene(false);
-        break;
+  // --- Knights and the dispatcher's script -----------------------------------
+  /**
+   * Follows the knights in the world: a marked suspect turns CAPTURED when a
+   * knight reaches them, and loses the box once they've left the building.
+   */
+  function updateMarks(): void {
+    if (!lastSnapshot) return;
+    const here = new Map(lastSnapshot.npcs.map((n) => [n.id, n]));
+    for (const [id, mark] of marks) {
+      const npc = here.get(id);
+      if (!npc) marks.delete(id);
+      else if (npc.detained && mark.kind !== "captured") {
+        marks.set(id, { kind: "captured" });
+        playSfx("send");
+      }
     }
+  }
+
+  /** Updates a feed's dispatch badge as the player hears each line. */
+  function followScript(line: InvestigationLine): void {
+    const view = views[line.camera - 1];
     if (view) setBadge(view, line);
   }
 
   function setBadge(view: FeedView, line: InvestigationLine): void {
     const { stage } = line;
-    const caught = line.case.suspect !== null;
+    const outcome =
+      line.outcome ?? (line.case.suspect !== null ? "caught" : "nothing");
     view.badge.textContent =
       stage === "resolved"
-        ? caught
+        ? outcome === "caught"
           ? "DISPATCH · SUSPECT CAPTURED"
-          : "DISPATCH · FALSE REPORT, CLEARED"
+          : outcome === "escaped"
+            ? "DISPATCH · SUSPECT ESCAPED"
+            : "DISPATCH · FALSE REPORT, CLEARED"
         : STAGE_BADGES[stage];
     view.badge.dataset.tone =
       stage === "resolved" || stage === "closed"
-        ? caught
+        ? outcome === "caught"
           ? "good"
           : "bad"
         : "info";
@@ -604,8 +757,10 @@ export const mountWatchStation: Screen = (ctx, params) => {
   }
 
   function drawFeeds(): void {
+    updateMarks();
     for (const view of views) {
-      view.renderer.draw(lastSnapshot, shiftT, marks);
+      // deskT keeps running after the watch, so people still walk.
+      view.renderer.draw(lastSnapshot, deskT, marks);
       syncMarks(view);
     }
   }
@@ -734,8 +889,11 @@ export const mountWatchStation: Screen = (ctx, params) => {
     const dt = Math.min((now - last) / 1000, MAX_DT);
     last = now;
     if (wrapping) {
-      // The world holds still on its last frame; dispatch keeps going.
-      deskT += dt;
+      // No more reports or attention tracking, but the building keeps moving
+      // so knights can finish their jobs while dispatch closes out.
+      const ticked = session.tick(dt);
+      deskT = ticked.t;
+      lastSnapshot = ticked.snapshot;
       desk.update(deskT);
       drawFeeds();
       checkWrapUp(now);
@@ -774,6 +932,8 @@ export const mountWatchStation: Screen = (ctx, params) => {
       world: watched ? watched.renderer.toWorld(gx, gy) : null,
     });
     if (source === "tracker") telemetry.webcamUsed = true;
+    if (attention.update({ t, source, cameraId: watched?.feed.id ?? null }))
+      attentionLapse();
 
     for (const view of views)
       view.root.classList.toggle("is-watched", view === watched);
@@ -784,20 +944,37 @@ export const mountWatchStation: Screen = (ctx, params) => {
 
     distractions.update(t, onPopup);
     if (plan.glitches) glitches.update(t);
+    updateQuestions(t);
     updateTimer(t);
     if (t >= config.durationSeconds) beginWrapUp(true);
   }
 
+  /** The gaze has been off every feed too long: ring the alarm and flash. */
+  function attentionLapse(): void {
+    playSfx("attentionAlarm");
+    setStatus(`ATTENTION LOST · -${ATTENTION_LAPSE_PENALTY} POINTS`);
+    stage.classList.remove("is-attention-lost");
+    void stage.offsetWidth; // restart the flash
+    stage.classList.add("is-attention-lost");
+    window.clearTimeout(lapseFlashTimer);
+    lapseFlashTimer = window.setTimeout(() => {
+      stage.classList.remove("is-attention-lost");
+      if (!wrapping && !reportMode) setStatus("SYSTEM READY");
+    }, LAPSE_FLASH_MS);
+  }
+
   // --- End of shift -------------------------------------------------------------
   /**
-   * Ends the watch: no more reports, the feeds freeze, and every dispatch
-   * line still to come is played (auto-play is forced on). The debrief opens
-   * once dispatch has closed every call and signed off (checkWrapUp).
+   * Ends the watch: no more reports or walk-ins, knights finish their jobs,
+   * and every dispatch line still to come is played (auto-play is forced on).
+   * The debrief opens once dispatch has closed every call and signed off
+   * (checkWrapUp).
    */
   function beginWrapUp(completed: boolean): void {
     if (wrapping || finished || !session) return;
     setReportMode(false);
     wrapping = true;
+    session.endWatch?.(shiftT);
     completedShift = completed;
     lastDispatchProgress = performance.now();
     glitches.destroy();
@@ -811,11 +988,37 @@ export const mountWatchStation: Screen = (ctx, params) => {
     timer.textContent = "SHIFT OVER";
     timer.classList.remove("is-ending");
     setStatus("SHIFT OVER · DISPATCH CLOSING OUT CALLS");
-    radio.drain();
+    // An open check-in can't be answered any more.
+    question = null;
+    radio.setPrompt("");
+    // Fit dispatch's remaining audio into OVERRUN_LIMIT_S: investigations go
+    // straight to their outcomes, and filler lines nobody heard yet are
+    // dropped until the rest fits before the sign-off.
+    wrapStartedAt = performance.now();
+    desk.hurry(deskT);
+    radio.drain(
+      OVERRUN_LIMIT_S -
+        signOffSeconds -
+        LINE_ALLOWANCE_S * (desk.remainingLines + 1),
+    );
   }
 
   function checkWrapUp(now: number): void {
     if (finished) return;
+    // Last resort when the estimates ran long: stop queueing, then cut off
+    // whatever is playing, so the sign-off still ends in time.
+    const signOffDue = OVERRUN_LIMIT_S - signOffSeconds;
+    const since = (now - wrapStartedAt) / 1000;
+    if (!signedOff && cutStage < 1 && since > signOffDue - LINE_ALLOWANCE_S) {
+      cutStage = 1;
+      console.warn("[dispatch] Out of time after the shift; dropping lines.");
+      desk.destroy();
+      radio.cut(false);
+    }
+    if (!signedOff && cutStage < 2 && since > signOffDue) {
+      cutStage = 2;
+      radio.cut(true);
+    }
     if (now - lastDispatchProgress > WRAP_UP_STALL_MS) {
       console.warn(
         "[dispatch] No radio progress after the shift; filing the debrief.",
@@ -880,6 +1083,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   // --- Lifecycle --------------------------------------------------------------
   function stopRuntime(): void {
     cancelAnimationFrame(raf);
+    window.clearTimeout(lapseFlashTimer);
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
     distractions.destroy();
@@ -927,6 +1131,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
       radio.receive(
         {
           headline: "SHIFT START",
+          optional: true,
           text: dispatchText("shift_start"),
           play: () => sayDispatch("shift_start"),
         },

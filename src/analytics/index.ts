@@ -1,7 +1,8 @@
 // Person 4: logging, scoring, and debrief. Talks to the rest of the game only
 // through the event bus:
 //   listens: shift:start, shift:end, world:map, world:snapshot,
-//            world:suspiciousStart, world:suspiciousEnd, gaze:sample,
+//            world:suspiciousStart, world:suspiciousEnd, world:capture,
+//            gaze:sample,
 //            flag:created, scene:navigate
 //   emits:   analytics:report (synchronously, in response to shift:end)
 import type { Emitter } from "mitt";
@@ -33,6 +34,12 @@ export {
   type ShiftSummary,
 } from "./history";
 export {
+  ATTENTION_LAPSE_PENALTY,
+  ATTENTION_LAPSE_SECONDS,
+  AttentionWatch,
+} from "./attention";
+export {
+  ESCAPED_LOSS,
   FALSE_FLAG_PENALTY,
   FLAG_GRACE_SECONDS,
   LOOKED_SECONDS,
@@ -79,6 +86,7 @@ export function installAnalytics({
   listen("world:suspiciousEnd", analytics.recordEventEnd);
   listen("gaze:sample", analytics.recordGaze);
   listen("flag:created", analytics.recordFlag);
+  listen("world:capture", analytics.recordCapture);
   listen("shift:end", (end) => {
     report = analytics.endShift(end);
     appendHistory(summarize(report), storage);

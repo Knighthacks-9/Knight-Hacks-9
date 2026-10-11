@@ -1,5 +1,8 @@
 import type {
   CameraDef,
+  CaptureEvent,
+  KnightOutcome,
+  KnightStatus,
   NpcSnapshot,
   SuspiciousBehavior,
   Vec2,
@@ -14,7 +17,7 @@ import {
   type Plan,
   type Step,
 } from "./behaviors";
-import { idx } from "./map";
+import { EXITS, idx } from "./map";
 import { findPath } from "./pathfinding";
 import { Rng } from "./rng";
 
@@ -24,6 +27,22 @@ const MAX_NORMAL_NPCS = 8;
 const QUICK_START_NPCS = 4;
 /** How long a detained NPC is held in place before being escorted out. */
 export const DETAIN_SECONDS = 10;
+
+/** Knights walk faster than anyone in the building (1.6 to 2.6). */
+export const KNIGHT_SPEED = 3.4;
+/** A knight this close (tiles) to the person has caught them. */
+const KNIGHT_REACH = 1.1;
+/** How often a knight re-plans the route to a moving person. */
+const KNIGHT_REPATH_SECONDS = 0.5;
+/** A knight who hasn't reached the person by now reports them escaped. */
+export const KNIGHT_GIVE_UP_SECONDS = 30;
+/** A caught person is held this long before the knight leads them out. */
+export const CAPTURE_HOLD_SECONDS = 3;
+/** A knight sent to an empty report looks around this long. */
+export const SEARCH_SECONDS = 3;
+/** The front entrance, where knights come in. */
+const KNIGHT_POST = EXITS[0];
+
 const SHIRT_COLORS = [
   0x4f81bd, 0xc0504d, 0x9bbb59, 0x8064a2, 0x4bacc6, 0xf79646, 0xd9d9d9,
   0x7f6000,
@@ -42,6 +61,20 @@ export interface SimOptions {
 export interface SimListener {
   onStart(ev: WorldEvent): void;
   onEnd(ev: WorldEvent): void;
+  /** A knight's job reached its outcome. */
+  onCapture?(ev: CaptureEvent): void;
+}
+
+/** What a knight was sent to do, and how far they've got. */
+interface KnightJob extends KnightStatus {
+  /** Where to look when there's nobody to chase (tile). */
+  spot: Vec2;
+  sentAt: number;
+  repathAt: number;
+  /** The tile the knight is currently heading for. */
+  goal: Vec2 | null;
+  /** Where the person was last seen (tile), for when they get away. */
+  lastSeen: Vec2 | null;
 }
 
 interface Npc {
@@ -58,7 +91,25 @@ interface Npc {
   waitLeft: number;
   /** Open suspicious event, if the NPC is currently in a tagged step. */
   active?: { id: string; behavior: SuspiciousBehavior };
+  /** Caught: held, then led out. */
+  detained?: boolean;
+  /** Set on knights. */
+  job?: KnightJob;
   done: boolean;
+}
+
+const tileOf = (n: { x: number; y: number }): Vec2 => ({
+  x: Math.floor(n.x),
+  y: Math.floor(n.y),
+});
+
+function nearestExit(from: Vec2): Vec2 {
+  return EXITS.reduce((best, e) =>
+    Math.abs(e.x - from.x) + Math.abs(e.y - from.y) <
+    Math.abs(best.x - from.x) + Math.abs(best.y - from.y)
+      ? e
+      : best,
+  );
 }
 
 export class WorldSim {
@@ -66,6 +117,7 @@ export class WorldSim {
   private rng: Rng;
   private npcs: Npc[] = [];
   private nextNpc = 1;
+  private nextKnight = 1;
   private nextEvent = 1;
   private t = 0;
   private nextNormalAt = 0;
@@ -73,6 +125,8 @@ export class WorldSim {
   private shiftSeconds: number;
   private anomalyCount: number;
   private spawnRate: number;
+  /** False once the watch is over: nobody new walks in. */
+  private spawning = true;
   private schedule: { at: number; behavior: SuspiciousBehavior }[];
   private camSets: { cam: CameraDef; tiles: Set<number> }[];
   private seenAny: Uint8Array;
@@ -128,9 +182,9 @@ export class WorldSim {
     this.t = t;
     const s = this.shiftSeconds;
     // Stop spawning walk-ins near the end (20s, less on very short shifts).
-    if (t < s - Math.min(20, Math.max(s - 70, s * 0.3))) {
+    if (this.spawning && t < s - Math.min(20, Math.max(s - 70, s * 0.3))) {
       if (t >= this.nextNormalAt) {
-        const alive = this.npcs.length;
+        const alive = this.npcs.filter((n) => !n.job).length;
         if (alive < Math.round(MAX_NORMAL_NPCS * this.spawnRate)) {
           this.spawn(normalPlan(this.map, this.rng));
           this.normalsSpawned++;
@@ -142,11 +196,23 @@ export class WorldSim {
             : t + this.rng.range(4, 9) / this.spawnRate;
       }
     }
-    while (this.schedule.length > 0 && this.schedule[0].at <= t) {
+    while (
+      this.spawning &&
+      this.schedule.length > 0 &&
+      this.schedule[0].at <= t
+    ) {
       this.spawnSuspicious(this.schedule.shift()!.behavior);
     }
-    for (const npc of this.npcs) this.step(npc, dt);
+    for (const npc of this.npcs) {
+      if (npc.job) this.updateKnight(npc, dt);
+      else this.step(npc, dt);
+    }
     this.npcs = this.npcs.filter((n) => !n.done);
+  }
+
+  /** The watch is over: no more walk-ins or scheduled suspects. */
+  stopSpawning(): void {
+    this.spawning = false;
   }
 
   spawnSuspicious(behavior: SuspiciousBehavior): string {
@@ -159,15 +225,56 @@ export class WorldSim {
    * Returns false when the NPC has already left.
    */
   detain(npcId: string): boolean {
-    const npc = this.npcs.find((n) => n.id === npcId && !n.done);
+    const npc = this.npcs.find((n) => n.id === npcId && !n.done && !n.job);
     if (!npc) return false;
     if (npc.active) this.closeEvent(npc);
-    npc.steps = [{ kind: "wait", seconds: DETAIN_SECONDS }];
-    npc.stepIndex = 0;
-    npc.waitLeft = DETAIN_SECONDS;
-    npc.path = [];
-    npc.pathIndex = 0;
+    npc.detained = true;
+    this.setSteps(npc, [{ kind: "wait", seconds: DETAIN_SECONDS }]);
     return true;
+  }
+
+  /**
+   * Sends a knight in from the front entrance. With a person to catch, the
+   * knight chases them, holds them, then leads them out; if they leave the
+   * building first they've escaped. With nobody (npcId null), the knight
+   * checks `spot` (a tile) and leaves. Returns the knight's id.
+   */
+  dispatchKnight(target: { npcId: string | null; spot: Vec2 }): string {
+    const id = `knight${this.nextKnight++}`;
+    const knight: Npc = {
+      id,
+      x: KNIGHT_POST.x + 0.5,
+      y: KNIGHT_POST.y + 0.5,
+      facingDeg: -90,
+      speed: KNIGHT_SPEED,
+      color: 0xc8d0d8,
+      steps: [],
+      stepIndex: 0,
+      path: [],
+      pathIndex: 0,
+      waitLeft: 0,
+      job: {
+        targetId: target.npcId,
+        phase: "en_route",
+        outcome: null,
+        spot: target.spot,
+        sentAt: this.t,
+        repathAt: this.t,
+        goal: null,
+        lastSeen: null,
+      },
+      done: false,
+    };
+    this.npcs.push(knight);
+    return id;
+  }
+
+  /** A knight's job, or null once they've left the building. */
+  knightStatus(knightId: string): KnightStatus | null {
+    const job = this.npcs.find((n) => n.id === knightId)?.job;
+    return job
+      ? { targetId: job.targetId, phase: job.phase, outcome: job.outcome }
+      : null;
   }
 
   private spawn(plan: Plan): string {
@@ -190,6 +297,16 @@ export class WorldSim {
     return npc.id;
   }
 
+  /** Replaces what an NPC is doing with `steps`, starting now. */
+  private setSteps(npc: Npc, steps: Step[]): void {
+    npc.steps = steps;
+    npc.stepIndex = -1;
+    npc.path = [];
+    npc.pathIndex = 0;
+    npc.waitLeft = 0;
+    this.advance(npc);
+  }
+
   /** Move to the next plan step, opening/closing suspicious events as tags change. */
   private advance(npc: Npc): void {
     npc.stepIndex++;
@@ -208,7 +325,7 @@ export class WorldSim {
       npc.waitLeft = step.seconds;
       return;
     }
-    const from = { x: Math.floor(npc.x), y: Math.floor(npc.y) };
+    const from = tileOf(npc);
     const extra = step.avoidCameras
       ? (i: number) => (this.seenAny[i] ? CAMERA_AVOID_COST : 0)
       : undefined;
@@ -233,23 +350,137 @@ export class WorldSim {
         this.advance(npc);
         continue;
       }
-      const target = npc.path[npc.pathIndex];
-      const dx = target.x + 0.5 - npc.x;
-      const dy = target.y + 0.5 - npc.y;
-      const dist = Math.hypot(dx, dy);
-      const move = npc.speed * budget;
-      if (dist > 0) npc.facingDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
-      if (move >= dist) {
-        npc.x = target.x + 0.5;
-        npc.y = target.y + 0.5;
-        npc.pathIndex++;
-        budget -= dist / npc.speed;
-      } else {
-        npc.x += (dx / dist) * move;
-        npc.y += (dy / dist) * move;
-        budget = 0;
-      }
+      budget = this.moveToward(npc, budget);
     }
+  }
+
+  /** Walks toward the next tile on the path; returns the unused time. */
+  private moveToward(npc: Npc, budget: number): number {
+    const target = npc.path[npc.pathIndex];
+    const dx = target.x + 0.5 - npc.x;
+    const dy = target.y + 0.5 - npc.y;
+    const dist = Math.hypot(dx, dy);
+    const move = npc.speed * budget;
+    if (dist > 0) npc.facingDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    if (move >= dist) {
+      npc.x = target.x + 0.5;
+      npc.y = target.y + 0.5;
+      npc.pathIndex++;
+      return budget - dist / npc.speed;
+    }
+    npc.x += (dx / dist) * move;
+    npc.y += (dy / dist) * move;
+    return 0;
+  }
+
+  private updateKnight(knight: Npc, dt: number): void {
+    const job = knight.job!;
+    if (job.phase !== "en_route") {
+      // Holding, searching, or walking out: an ordinary plan.
+      this.step(knight, dt);
+      if (job.phase === "on_scene" && knight.stepIndex >= 1) {
+        // The hold or the search is over.
+        if (job.outcome === null) this.settle(knight, "nothing");
+        job.phase = "leaving";
+      }
+      return;
+    }
+
+    const target = job.targetId
+      ? this.npcs.find((n) => n.id === job.targetId && !n.done)
+      : undefined;
+    if (job.targetId && !target) return this.giveUp(knight, "escaped");
+    if (this.t - job.sentAt > KNIGHT_GIVE_UP_SECONDS) {
+      return this.giveUp(knight, job.targetId ? "escaped" : "nothing");
+    }
+    if (target) job.lastSeen = tileOf(target);
+
+    const goalCenter = target ?? { x: job.spot.x + 0.5, y: job.spot.y + 0.5 };
+    if (
+      Math.hypot(goalCenter.x - knight.x, goalCenter.y - knight.y) <=
+      KNIGHT_REACH
+    ) {
+      knight.facingDeg =
+        (Math.atan2(goalCenter.y - knight.y, goalCenter.x - knight.x) * 180) /
+        Math.PI;
+      if (target) this.capture(knight, target);
+      else {
+        job.phase = "on_scene";
+        this.setSteps(knight, [
+          { kind: "wait", seconds: SEARCH_SECONDS },
+          { kind: "walk", to: nearestExit(tileOf(knight)) },
+        ]);
+      }
+      return;
+    }
+
+    // Chase: re-plan now and then, or when the person changes tiles.
+    const goal = target ? tileOf(target) : job.spot;
+    const moved = !job.goal || job.goal.x !== goal.x || job.goal.y !== goal.y;
+    if (
+      this.t >= job.repathAt ||
+      (moved && knight.pathIndex >= knight.path.length)
+    ) {
+      job.repathAt = this.t + KNIGHT_REPATH_SECONDS;
+      job.goal = goal;
+      knight.steps = [{ kind: "walk", to: goal }];
+      knight.stepIndex = 0;
+      knight.path = findPath(this.map, tileOf(knight), goal) ?? [];
+      knight.pathIndex = 1;
+    }
+    let budget = dt;
+    for (
+      let guard = 0;
+      guard < 64 && budget > 0 && knight.pathIndex < knight.path.length;
+      guard++
+    ) {
+      budget = this.moveToward(knight, budget);
+    }
+  }
+
+  /** The knight reached the person: hold them, then lead them out together. */
+  private capture(knight: Npc, target: Npc): void {
+    const job = knight.job!;
+    job.phase = "on_scene";
+    this.settle(knight, "caught");
+    if (target.active) this.closeEvent(target);
+    target.detained = true;
+    const exit = nearestExit(tileOf(target));
+    // Walk out side by side, at the person's pace.
+    knight.speed = target.speed;
+    this.setSteps(target, [
+      { kind: "wait", seconds: CAPTURE_HOLD_SECONDS },
+      { kind: "walk", to: exit },
+    ]);
+    this.setSteps(knight, [
+      { kind: "wait", seconds: CAPTURE_HOLD_SECONDS },
+      { kind: "walk", to: exit },
+    ]);
+  }
+
+  /** Nobody to catch any more: look where they were last seen, then leave. */
+  private giveUp(knight: Npc, outcome: KnightOutcome): void {
+    const job = knight.job!;
+    this.settle(knight, outcome);
+    job.phase = "leaving";
+    const look = job.lastSeen ?? job.spot;
+    this.setSteps(knight, [
+      { kind: "walk", to: look },
+      { kind: "wait", seconds: 1.5 },
+      { kind: "walk", to: nearestExit(look) },
+    ]);
+  }
+
+  private settle(knight: Npc, outcome: KnightOutcome): void {
+    const job = knight.job!;
+    if (job.outcome !== null) return;
+    job.outcome = outcome;
+    this.listener.onCapture?.({
+      knightId: knight.id,
+      npcId: job.targetId,
+      t: this.t,
+      outcome,
+    });
   }
 
   private closeEvent(npc: Npc): void {
@@ -277,7 +508,7 @@ export class WorldSim {
   snapshot(): WorldSnapshot {
     const npcs: NpcSnapshot[] = this.npcs.map((n) => {
       const step = n.steps[n.stepIndex];
-      return {
+      const snap: NpcSnapshot = {
         id: n.id,
         x: n.x,
         y: n.y,
@@ -286,7 +517,18 @@ export class WorldSim {
         color: n.color,
         cameraIds: this.camerasSeeing(n.x, n.y),
         suspicious: n.active !== undefined,
+        acting: n.active !== undefined && step?.act === true,
       };
+      if (n.detained) snap.detained = true;
+      if (n.job) {
+        snap.role = "knight";
+        snap.knight = {
+          targetId: n.job.targetId,
+          phase: n.job.phase,
+          outcome: n.job.outcome,
+        };
+      }
+      return snap;
     });
     return { t: this.t, npcs };
   }

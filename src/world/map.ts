@@ -113,6 +113,27 @@ export function isWalkable(map: WorldMap, x: number, y: number): boolean {
   return tileAt(map, x, y) !== "wall";
 }
 
+/**
+ * The walkable tile nearest the middle of what a camera sees: where a knight
+ * checks a report that pointed at nobody. Null if the camera sees no floor.
+ */
+export function cameraSpot(map: WorldMap, camera: CameraDef): Vec2 | null {
+  const floor = camera.visibleTiles.filter(
+    (i) => map.tiles[i] !== "wall" && map.tiles[i] !== "exit",
+  );
+  if (!floor.length) return null;
+  const xs = floor.map((i) => i % map.width);
+  const ys = floor.map((i) => Math.floor(i / map.width));
+  const cx = xs.reduce((s, x) => s + x, 0) / floor.length;
+  const cy = ys.reduce((s, y) => s + y, 0) / floor.length;
+  let best = 0;
+  for (let i = 1; i < floor.length; i++) {
+    const d = (xs[i] - cx) ** 2 + (ys[i] - cy) ** 2;
+    if (d < (xs[best] - cx) ** 2 + (ys[best] - cy) ** 2) best = i;
+  }
+  return { x: xs[best], y: ys[best] };
+}
+
 export function roomAt(map: WorldMap, x: number, y: number): Room | undefined {
   return map.rooms.find(
     (r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h,

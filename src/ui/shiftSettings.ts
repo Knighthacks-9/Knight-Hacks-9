@@ -38,6 +38,11 @@ export interface ShiftSettings {
   aura: AuraMode;
   /** How long a timed aura lasts after the anomaly starts. */
   auraSeconds: number;
+  /**
+   * Advanced: a report counts if the suspect was on that feed this many
+   * seconds ago or less. Not part of any difficulty preset.
+   */
+  reportWindowSeconds: number;
 }
 
 export const DEFAULT_SHIFT_SETTINGS: ShiftSettings = {
@@ -49,17 +54,20 @@ export const DEFAULT_SHIFT_SETTINGS: ShiftSettings = {
   glitches: true,
   reportCounter: true,
   highlight: "timed",
-  highlightSeconds: 2,
+  highlightSeconds: 1,
   aura: "off",
   auraSeconds: 3,
+  reportWindowSeconds: 5,
 };
 
 /** The world has six cameras. */
 export const CAMERA_OPTIONS = [2, 4, 6] as const;
 export const MIN_ANOMALIES = 1;
 export const MAX_ANOMALIES = 12;
-export const MIN_AURA_SECONDS = 1;
+export const MIN_AURA_SECONDS = 0.5;
 export const MAX_AURA_SECONDS = 15;
+export const MIN_REPORT_WINDOW = 3;
+export const MAX_REPORT_WINDOW = 15;
 export const AURA_MODES: readonly AuraMode[] = ["always", "timed", "off"];
 export const RATES: readonly Rate[] = ["low", "normal", "high"];
 export const DISTRACTION_RATES: readonly DistractionRate[] = ["off", ...RATES];
@@ -86,10 +94,24 @@ function auraMode(value: unknown, fallback: AuraMode): AuraMode {
     : fallback;
 }
 
+/** Effect lengths are 0.5s, then whole seconds up to MAX_AURA_SECONDS. */
+function snapAuraSeconds(value: number): number {
+  return value < 1
+    ? MIN_AURA_SECONDS
+    : Math.min(MAX_AURA_SECONDS, Math.round(value));
+}
+
 function auraSeconds(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value)
-    ? Math.min(MAX_AURA_SECONDS, Math.max(MIN_AURA_SECONDS, Math.round(value)))
+    ? snapAuraSeconds(value)
     : fallback;
+}
+
+/** The next effect length up (dir 1) or down (dir -1): 0.5s, 1s, 2s, ... */
+export function stepAuraSeconds(current: number, dir: number): number {
+  if (dir < 0 && current <= 1) return MIN_AURA_SECONDS;
+  if (dir > 0 && current < 1) return 1;
+  return snapAuraSeconds(current + dir);
 }
 
 /** Fills in anything missing or invalid from the defaults. */
@@ -124,6 +146,14 @@ export function sanitizeShiftSettings(value: unknown): ShiftSettings {
     highlightSeconds: auraSeconds(v.highlightSeconds, d.highlightSeconds),
     aura: auraMode(v.aura, d.aura),
     auraSeconds: auraSeconds(v.auraSeconds, d.auraSeconds),
+    reportWindowSeconds:
+      typeof v.reportWindowSeconds === "number" &&
+      Number.isFinite(v.reportWindowSeconds)
+        ? Math.min(
+            MAX_REPORT_WINDOW,
+            Math.max(MIN_REPORT_WINDOW, Math.round(v.reportWindowSeconds)),
+          )
+        : d.reportWindowSeconds,
   };
 }
 
@@ -152,11 +182,18 @@ export function isCustomized(settings: ShiftSettings): boolean {
 /**
  * Crowd, pop-ups, glitches, report counter and anomaly effects each
  * difficulty starts from. The effects mirror the level's own: a steady tint
- * on Easy, a 2s / 1s flash on Normal / Hard, and embers on Hard.
+ * on Easy, a 1s flash on Normal and Hard, and embers on Hard.
  */
 const LEVEL_PRESETS: Record<
   number,
-  Omit<ShiftSettings, "custom" | "cameraCount" | "anomalies" | "auraSeconds">
+  Omit<
+    ShiftSettings,
+    | "custom"
+    | "cameraCount"
+    | "anomalies"
+    | "auraSeconds"
+    | "reportWindowSeconds"
+  >
 > = {
   1: {
     npcRate: "low",
@@ -164,7 +201,7 @@ const LEVEL_PRESETS: Record<
     glitches: false,
     reportCounter: true,
     highlight: "always",
-    highlightSeconds: 2,
+    highlightSeconds: 1,
     aura: "off",
   },
   2: {
@@ -173,7 +210,7 @@ const LEVEL_PRESETS: Record<
     glitches: true,
     reportCounter: false,
     highlight: "timed",
-    highlightSeconds: 2,
+    highlightSeconds: 1,
     aura: "off",
   },
   3: {
@@ -197,12 +234,20 @@ export function presetSettings(level: LevelConfig): ShiftSettings {
   };
 }
 
-/** The options in force: the player's when Custom, else the level's preset. */
+/**
+ * The options in force: the player's when Custom, else the level's preset.
+ * The report window is always the player's (it's not part of a preset).
+ */
 export function effectiveSettings(
   level: LevelConfig,
   settings: ShiftSettings,
 ): ShiftSettings {
-  return settings.custom ? settings : presetSettings(level);
+  return settings.custom
+    ? settings
+    : {
+        ...presetSettings(level),
+        reportWindowSeconds: settings.reportWindowSeconds,
+      };
 }
 
 /**
@@ -237,7 +282,7 @@ export interface ShiftPlan {
   glitches: boolean;
   /** Show the sightings count and meter in the Watch Station. */
   reportCounter: boolean;
-  /** Red sprite tint; null (a difficulty preset) keeps the level's own. */
+  /** Sprite tint (green, red on Hard); null (a difficulty preset) keeps the level's own. */
   highlight: AuraOverride | null;
   /** Rising embers; null (a difficulty preset) keeps the level's own. */
   aura: AuraOverride | null;
@@ -259,6 +304,7 @@ export function planShift(
       // Only a count the player set is exact; presets keep the level's.
       fixedAnomalies: chosen.custom,
       npcSpawnRate: NPC_SPAWN_RATE[settings.npcRate],
+      reportWindowSeconds: settings.reportWindowSeconds,
     },
     distractionFrequency: DISTRACTION_FREQUENCY[settings.distractions],
     glitches: settings.glitches,

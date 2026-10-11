@@ -50,6 +50,7 @@ export function voiceInputSupported(): boolean {
 
 /** Speaks a line in the dispatcher voice. Resolves when playback finishes. */
 export async function speak(text: string): Promise<VoiceProvider> {
+  const ticket = stops;
   if (voiceOn()) {
     try {
       const response = await fetch(TTS_URL, {
@@ -61,8 +62,11 @@ export async function speak(text: string): Promise<VoiceProvider> {
         response.ok &&
         response.headers.get("Content-Type")?.startsWith("audio/")
       ) {
+        const blob = await response.blob();
+        // Cut off while the audio was loading: stay quiet.
+        if (ticket !== stops) return "elevenlabs";
         console.info("[voice] TTS provider: elevenlabs");
-        await playBlob(await response.blob());
+        await playBlob(blob);
         return "elevenlabs";
       }
       noteFailure("TTS", response.status);
@@ -70,6 +74,7 @@ export async function speak(text: string): Promise<VoiceProvider> {
       console.warn("[voice] ElevenLabs TTS unavailable.", error);
     }
   }
+  if (ticket !== stops) return "browser";
   console.info("[voice] TTS provider: browser");
   await speakWithBrowser(text);
   return "browser";
@@ -87,11 +92,16 @@ export async function playDispatchLine(
     await speak(text);
     return;
   }
+  const ticket = stops;
   try {
     const audio = new Audio(
       `${import.meta.env.BASE_URL}audio/dispatch_${id}.mp3`,
     );
     await audio.play();
+    if (ticket !== stops) {
+      audio.pause();
+      return;
+    }
     console.info(`[voice] TTS provider: pre-generated (${id})`);
     await finished(audio);
   } catch {
@@ -101,6 +111,7 @@ export async function playDispatchLine(
 
 /** Cuts off whatever the dispatcher is saying (e.g. when a shift ends). */
 export function stopSpeaking(): void {
+  stops += 1;
   const audio = currentAudio;
   if (audio) {
     audio.pause();
@@ -111,6 +122,8 @@ export function stopSpeaking(): void {
 }
 
 let currentAudio: HTMLAudioElement | null = null;
+/** Counts stopSpeaking() calls, so lines still loading know they were cut. */
+let stops = 0;
 
 async function playBlob(blob: Blob): Promise<void> {
   const url = URL.createObjectURL(blob);

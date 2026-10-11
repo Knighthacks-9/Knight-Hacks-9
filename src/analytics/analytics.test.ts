@@ -131,7 +131,10 @@ describe("shift analytics", () => {
     expect(outcome("ev2")).toBe("missed-looking");
     expect(outcome("ev3")).toBe("missed-not-looking");
     expect(report.falseFlags).toHaveLength(1);
-    expect(report.score).toBe(28); // 1 of 3 caught, minus 5 for the false flag
+    // 1 of 3 caught (33), minus 5 for the false flag and 5 for each of the
+    // five 5 s attention lapses in the 25 s spent off the feeds.
+    expect(report.attentionLapses).toBe(5);
+    expect(report.score).toBe(3);
     expect(report.passed).toBe(false);
 
     const cam2 = report.feeds.find((f) => f.cameraId === "cam2")!;
@@ -188,6 +191,66 @@ describe("shift analytics", () => {
     const report = analytics.endShift({ t: 5, completed: false });
     expect(report.score).toBe(45); // 1 of 2 caught, minus 5 for the false flag
     expect(report.passed).toBe(false);
+  });
+
+  it("counts an escaped suspect as caught but worth half the points", () => {
+    const analytics = createShiftAnalytics();
+    analytics.startShift({ level: 1, shiftSeconds: 60, cameraIds: ["cam1"] });
+    analytics.recordEventStart(event("ev1", "npc1", 1));
+    analytics.recordEventStart(event("ev2", "npc2", 2));
+    analytics.recordFlag({ t: 3, npcId: "npc1", cameraId: "cam1" });
+    analytics.recordFlag({ t: 4, npcId: "npc2", cameraId: "cam1" });
+    analytics.recordCapture({
+      knightId: "knight1",
+      npcId: "npc1",
+      t: 10,
+      outcome: "caught",
+    });
+    analytics.recordCapture({
+      knightId: "knight2",
+      npcId: "npc2",
+      t: 12,
+      outcome: "escaped",
+    });
+
+    const report = analytics.endShift({ t: 60, completed: true });
+    expect(report.events.map((e) => [e.outcome, e.escaped])).toEqual([
+      ["caught", false],
+      ["caught", true],
+    ]);
+    expect(report.score).toBe(75); // 1.5 of 2
+    expect(report.passed).toBe(true);
+  });
+
+  it("ignores behaviors that start after the watch ended", () => {
+    const analytics = createShiftAnalytics();
+    analytics.startShift({ level: 1, shiftSeconds: 60, cameraIds: ["cam1"] });
+    analytics.recordEventStart(event("ev1", "npc1", 1));
+    analytics.recordFlag({ t: 3, npcId: "npc1", cameraId: "cam1" });
+    // Dispatch is still wrapping up when another behavior starts.
+    analytics.recordEventStart(event("ev2", "npc2", 65));
+
+    const report = analytics.endShift({ t: 60, completed: true });
+    expect(report.events.map((e) => e.id)).toEqual(["ev1"]);
+    expect(report.score).toBe(100);
+  });
+
+  it("uses the shift's report window", () => {
+    const run = (reportWindowSeconds: number) => {
+      const analytics = createShiftAnalytics();
+      analytics.startShift({
+        level: 1,
+        shiftSeconds: 60,
+        cameraIds: ["cam1"],
+        reportWindowSeconds,
+      });
+      analytics.recordEventStart(event("ev1", "npc1", 1));
+      analytics.recordEventEnd(event("ev1", "npc1", 10));
+      analytics.recordFlag({ t: 18, npcId: "npc1", cameraId: "cam1" });
+      return analytics.endShift({ t: 60, completed: true });
+    };
+    expect(run(5).events[0].outcome).not.toBe("caught");
+    expect(run(10).events[0].outcome).toBe("caught");
   });
 });
 

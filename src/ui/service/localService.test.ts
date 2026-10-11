@@ -156,4 +156,98 @@ describe("local NightwatchService", () => {
     expect(flags.map((f) => f.npcId)).toEqual(["test-npc"]);
     service.abandonShift(session.shiftId);
   });
+
+  it("matches reports within the shift's report window", async () => {
+    const run = async (reportWindowSeconds?: number) => {
+      const bus = mitt<AppEvents>();
+      const service = createLocalNightwatchService(bus);
+      const session = await service.startShift({
+        ...levelConfig(1),
+        durationSeconds: 120,
+        reportWindowSeconds,
+      });
+      session.tick(0.5);
+      // Seen on cam2 once, at 0.5 s, then never again.
+      bus.emit("world:suspiciousStart", {
+        id: "test-event",
+        npcId: "test-npc",
+        behavior: "loitering",
+        t: 0.5,
+        x: 0,
+        y: 0,
+        cameraIds: ["cam2"],
+      });
+      const receipt = await service.submitReport(session.shiftId, {
+        cameraId: "cam2",
+        timestamp: 8.5,
+        source: "manual",
+      });
+      service.abandonShift(session.shiftId);
+      return receipt.suspect?.npcId ?? null;
+    };
+    expect(await run()).toBeNull(); // 8 s late, default window is 5 s
+    expect(await run(10)).toBe("test-npc");
+  });
+
+  it("sends a knight, records how it ended, and scores only the watch", async () => {
+    const bus = mitt<AppEvents>();
+    const stop = installAnalytics({
+      bus,
+      panelId: "none",
+      storage: memoryStorage(),
+    });
+    const service = createLocalNightwatchService(bus);
+    const captures: AppEvents["world:capture"][] = [];
+    const ends: AppEvents["shift:end"][] = [];
+    bus.on("world:capture", (c) => captures.push(c));
+    bus.on("shift:end", (e) => ends.push(e));
+    const session = await service.startShift({
+      ...levelConfig(3),
+      durationSeconds: 200,
+    });
+    const shown = new Set(session.cameras.map((c) => c.id));
+
+    // Wait for a suspect on a shown feed, then report them right away.
+    let target: { npcId: string; cameraId: string } | null = null;
+    bus.on("world:snapshot", (s) => {
+      if (target) return;
+      const npc = s.npcs.find(
+        (n) => n.suspicious && n.cameraIds.some((id) => shown.has(id)),
+      );
+      if (npc)
+        target = {
+          npcId: npc.id,
+          cameraId: npc.cameraIds.find((id) => shown.has(id))!,
+        };
+    });
+    let t = 0;
+    while (!target && t < 200) t = session.tick(0.1).t;
+    expect(target).not.toBeNull();
+    const { npcId, cameraId } = target!;
+    const receipt = await service.submitReport(session.shiftId, {
+      cameraId,
+      timestamp: t,
+      source: "manual",
+    });
+    expect(receipt.suspect?.npcId).toBe(npcId);
+
+    const knight = session.dispatchKnight!(npcId, cameraId)!;
+    expect(session.knightStatus!(knight)?.phase).toBe("en_route");
+    session.endWatch!(t);
+    const watchEnded = t;
+    for (let i = 0; i < 600 && !captures.length; i++) session.tick(0.1);
+    expect(captures).toEqual([
+      expect.objectContaining({ knightId: knight, npcId }),
+    ]);
+
+    const result = await service.completeShift(session.shiftId, {
+      completed: true,
+      telemetry: telemetry([{ cameraId, timestamp: t, source: "manual" }]),
+    });
+    // Scored up to the end of the watch, not the wrap-up after it.
+    expect(ends[0].t).toBe(watchEnded);
+    expect(result.caught).toBe(1);
+    expect(result.escaped).toBe(captures[0].outcome === "escaped" ? 1 : 0);
+    stop();
+  });
 });

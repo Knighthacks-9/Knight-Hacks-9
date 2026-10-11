@@ -1,6 +1,7 @@
 // NPC sprite sheets in public/assets/npcs: 256x256, 4x4 frames of 64x64.
 // Rows face down, left, right, up; each row is a 4-frame walk cycle and
-// column 0 doubles as the standing pose. No engine imports, so both the
+// column 0 doubles as the standing pose. knight.png (the security officer)
+// uses the same layout but is not one of the civilian sheets. No engine imports, so both the
 // Phaser scenes and the DOM UI can use it.
 
 export const NPC_SHEETS = ["npc1", "npc2", "npc3"] as const;

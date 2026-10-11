@@ -1,4 +1,5 @@
-// Parses push-to-talk transcripts such as "Camera 3, sighting" into a feed.
+// Parses push-to-talk transcripts such as "Camera 3, sighting" into a feed,
+// and numbers in answers to dispatch's questions.
 
 const NUMBER_WORDS: Record<string, number> = {
   one: 1,
@@ -21,6 +22,9 @@ const NUMBER_WORDS: Record<string, number> = {
   eighth: 8,
   nine: 9,
   ninth: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
 };
 /** Sound-alikes only trusted right after "camera". */
 const HOMOPHONES: Record<string, number> = { to: 2, too: 2, for: 4, ate: 8 };
@@ -28,6 +32,23 @@ const HOMOPHONES: Record<string, number> = { to: 2, too: 2, for: 4, ate: 8 };
 function toNumber(word: string, loose: boolean): number | null {
   if (/^\d+$/.test(word)) return Number(word);
   return NUMBER_WORDS[word] ?? (loose ? (HOMOPHONES[word] ?? null) : null);
+}
+
+function spokenWords(transcript: string): string[] {
+  return transcript
+    .toLowerCase()
+    .replace(/([a-z])(\d)/g, "$1 $2") // "cam3" → "cam 3"
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/** The first number spoken ("three", "3"), or null if there is none. */
+export function parseNumber(transcript: string): number | null {
+  for (const word of spokenWords(transcript)) {
+    const n = toNumber(word, false);
+    if (n !== null) return n;
+  }
+  return null;
 }
 
 /**
@@ -38,11 +59,7 @@ export function parseCameraCommand(
   transcript: string,
   cameraCount: number,
 ): number | null {
-  const words = transcript
-    .toLowerCase()
-    .replace(/([a-z])(\d)/g, "$1 $2") // "cam3" → "cam 3"
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+  const words = spokenWords(transcript);
   const valid = (n: number | null) =>
     n !== null && n >= 1 && n <= cameraCount ? n : null;
 

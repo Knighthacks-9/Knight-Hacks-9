@@ -22,7 +22,12 @@ import {
   mediaPipeGazeTracker,
   validationErrorPx,
 } from "../../vision";
-import { buildMap, startWorld, type WorldHandle } from "../../world";
+import {
+  buildMap,
+  cameraSpot,
+  startWorld,
+  type WorldHandle,
+} from "../../world";
 import { buildShiftResult } from "./shiftResult";
 import type {
   AnomalyReport,
@@ -108,6 +113,8 @@ interface LocalShift extends ShiftSession {
   extraSpawns: number[];
   reportCount: number;
   report: ShiftReport | null;
+  /** Shift time the watch ended (endWatch); the shift is scored up to here. */
+  endedAt: number | null;
   stop(): void;
 }
 
@@ -146,17 +153,21 @@ export function createLocalNightwatchService(
     active = null;
   }
 
+  /** Seconds a report may trail the suspect (Shift Setup's report window). */
+  const reportWindow = (shift: LocalShift) =>
+    shift.config.reportWindowSeconds ?? FLAG_GRACE_SECONDS;
+
   /** Picks the suspect a camera report refers to, if any. */
   function resolveReport(shift: LocalShift, cameraId: string, t: number) {
+    const grace = reportWindow(shift);
     let best: [string, TrackedEvent] | null = null;
     let duplicate: TrackedEvent | null = null;
     for (const entry of shift.events) {
       const event = entry[1];
       const active =
-        t >= event.start &&
-        (event.end === null || t <= event.end + FLAG_GRACE_SECONDS);
+        t >= event.start && (event.end === null || t <= event.end + grace);
       const seen = event.seenOn.get(cameraId);
-      if (!active || seen === undefined || t - seen > FLAG_GRACE_SECONDS) {
+      if (!active || seen === undefined || t - seen > grace) {
         continue;
       }
       if (event.reported) duplicate ??= event;
@@ -234,8 +245,13 @@ export function createLocalNightwatchService(
         extraSpawns,
         reportCount: 0,
         report: null,
+        endedAt: null,
         tick(dt) {
-          while (shift.extraSpawns.length && shift.extraSpawns[0] <= shift.t) {
+          while (
+            shift.endedAt === null &&
+            shift.extraSpawns.length &&
+            shift.extraSpawns[0] <= shift.t
+          ) {
             shift.extraSpawns.shift();
             world.spawnSuspicious(
               BEHAVIORS[Math.floor(Math.random() * BEHAVIORS.length)],
@@ -248,8 +264,20 @@ export function createLocalNightwatchService(
         recordGaze(observation) {
           bus.emit("gaze:sample", { t: shift.t, ...observation });
         },
-        detain(npcId) {
-          world.detain(npcId);
+        dispatchKnight(npcId, cameraId) {
+          const camera = map!.cameras.find((c) => c.id === cameraId);
+          const spot = (camera && cameraSpot(map!, camera)) ?? {
+            x: Math.floor(map!.width / 2),
+            y: Math.floor(map!.height / 2),
+          };
+          return world.dispatchKnight({ npcId, spot });
+        },
+        knightStatus(knightId) {
+          return world.knightStatus(knightId);
+        },
+        endWatch(t) {
+          shift.endedAt ??= t;
+          world.stopSpawning();
         },
         stop() {
           world.stop();
@@ -261,7 +289,10 @@ export function createLocalNightwatchService(
         shift.snapshot = snapshot;
         const where = new Map(snapshot.npcs.map((n) => [n.id, n.cameraIds]));
         for (const event of events.values()) {
-          if (event.end !== null && snapshot.t > event.end + FLAG_GRACE_SECONDS)
+          if (
+            event.end !== null &&
+            snapshot.t > event.end + reportWindow(shift)
+          )
             continue;
           for (const id of where.get(event.npcId) ?? [])
             event.seenOn.set(id, snapshot.t);
@@ -293,6 +324,7 @@ export function createLocalNightwatchService(
         level: config.level,
         shiftSeconds: config.durationSeconds,
         cameraIds: cameras.map((c) => c.id),
+        reportWindowSeconds: config.reportWindowSeconds,
       });
       return shift;
     },
@@ -394,7 +426,10 @@ export function createLocalNightwatchService(
     async completeShift(shiftId, outcome) {
       const shift = requireShift(shiftId);
       // Analytics answers shift:end synchronously with analytics:report.
-      bus.emit("shift:end", { t: shift.t, completed: outcome.completed });
+      bus.emit("shift:end", {
+        t: shift.endedAt ?? shift.t,
+        completed: outcome.completed,
+      });
       const report = shift.report;
       stopActive();
       if (!report) throw new Error("Analytics did not return a shift report.");

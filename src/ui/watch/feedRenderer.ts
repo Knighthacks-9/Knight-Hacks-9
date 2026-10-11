@@ -43,9 +43,8 @@ export type GlitchKind =
 
 /** Dispatch's mark on a person, shown on every feed that sees them. */
 export interface PersonMark {
-  kind: "marked" | "captured" | "cleared";
-  /** A security officer stands beside them (the unit is on scene). */
-  unit: boolean;
+  /** marked: reported, a knight is on the way. captured: the knight has them. */
+  kind: "marked" | "captured";
 }
 
 /** A marked person on this feed, in CSS pixels from the canvas's top-left. */
@@ -62,76 +61,98 @@ export interface MarkBox {
 const MARK_MIN_CSS = 16;
 const MARK_PAD_CSS = 6;
 
-/** The security officer: an NPC sheet tinted uniform blue. */
-const OFFICER_SHEET = "npc1";
-const OFFICER_FILTER =
-  "sepia(1) saturate(3) hue-rotate(175deg) brightness(0.85) drop-shadow(0 0 1px #7fb4ff)";
+/** Knights sent after reports: their own sheet, laid out like the NPC sheets. */
+const OFFICER_SHEET = "knight";
+const OFFICER_FILTER = "drop-shadow(0 0 1px #7fb4ff)";
 
 let grain: HTMLCanvasElement | null = null;
 
-/** Total length of the two red flashes when an anomaly starts, per level. */
-const FLASH_SECONDS: Record<number, number> = { 2: 2, 3: 1 };
-/** Embers around an anomaly on level 3. */
+/**
+ * Suspect filters. Easy and Normal (levels 1-2) use a soft, see-through green
+ * tint and glow; Hard keeps the loud red.
+ */
+const RED_TINT =
+  "sepia(1) saturate(6) hue-rotate(-40deg) brightness(1.1) drop-shadow(0 0 2px #ff3030)";
+const RED_FLASH =
+  "sepia(1) saturate(10) hue-rotate(-50deg) brightness(1.8) drop-shadow(0 0 4px #ff0000)";
+const GREEN_TINT =
+  "sepia(0.45) saturate(1.8) hue-rotate(75deg) drop-shadow(0 0 1px rgba(90,255,130,0.3))";
+const GREEN_FLASH =
+  "sepia(0.6) saturate(2.5) hue-rotate(75deg) brightness(1.15) drop-shadow(0 0 2px rgba(90,255,130,0.35))";
+
+/** Total length of the two flashes when a suspect starts acting, per level. */
+const FLASH_SECONDS: Record<number, number> = { 2: 1, 3: 1 };
+/** Embers around a suspect acting on level 3. */
 const PARTICLES = 10;
 
-/** Flashes and particles keep going this long after an anomaly ends. */
+/** Flashes and particles keep going this long after an act ends. */
 const LINGER_SECONDS = 0.4;
 
+/** World cameras some feed on screen shows (with how many feeds show each). */
+const shownCameras = new Map<string, number>();
+
 /**
- * Shift time each NPC's current (or just-finished) anomaly started and ended,
- * shared by every feed so the level 2-3 flash happens once, when the anomaly
- * begins, not per feed.
+ * Highlights follow `acting`: the visible part of a suspicious behavior
+ * (stopping at a door, being in the Server Room, ...), not the walk to it.
+ * These hold when each NPC's current (or just-finished) act started and
+ * ended, shared by every feed so a flash happens once per act, not per feed.
+ * An act's clock starts the first moment a feed on screen sees it, so a
+ * flash is never spent off camera, and each new act (every return to the
+ * door) flashes again.
  */
-const anomalyStart = new Map<string, number>();
-const anomalyEnd = new Map<string, number>();
+const actStart = new Map<string, number>();
+const actEnd = new Map<string, number>();
 let lastSnapshotT = -1;
-function trackAnomalies(snapshot: WorldSnapshot | null): void {
+function trackActs(snapshot: WorldSnapshot | null): void {
   if (!snapshot || snapshot.t === lastSnapshotT) return;
   // A new shift restarts the clock (and reuses NPC ids): forget the old one.
   if (snapshot.t < lastSnapshotT) {
-    anomalyStart.clear();
-    anomalyEnd.clear();
+    actStart.clear();
+    actEnd.clear();
   }
   lastSnapshotT = snapshot.t;
   for (const npc of snapshot.npcs) {
-    if (npc.suspicious) {
-      if (!anomalyStart.has(npc.id) || anomalyEnd.has(npc.id)) {
-        anomalyStart.set(npc.id, snapshot.t);
+    if (npc.acting) {
+      // A new act right after the last one starts a new clock.
+      if (actEnd.has(npc.id)) {
+        actStart.delete(npc.id);
+        actEnd.delete(npc.id);
       }
-      anomalyEnd.delete(npc.id);
-    } else if (anomalyStart.has(npc.id)) {
-      const end = anomalyEnd.get(npc.id);
-      if (end === undefined) anomalyEnd.set(npc.id, snapshot.t);
+      const onScreen = npc.cameraIds.some((id) => shownCameras.has(id));
+      if (!actStart.has(npc.id) && onScreen) actStart.set(npc.id, snapshot.t);
+    } else if (actStart.has(npc.id)) {
+      const end = actEnd.get(npc.id);
+      if (end === undefined) actEnd.set(npc.id, snapshot.t);
       else if (snapshot.t - end > LINGER_SECONDS) {
-        anomalyStart.delete(npc.id);
-        anomalyEnd.delete(npc.id);
+        actStart.delete(npc.id);
+        actEnd.delete(npc.id);
       }
     }
   }
 }
 
-/** True while an NPC is doing an anomaly or within LINGER_SECONDS after. */
-function anomalyEffects(npc: NpcSnapshot, now: number): boolean {
-  if (npc.suspicious) return true;
-  const end = anomalyEnd.get(npc.id);
+/** True while an NPC is acting suspicious or within LINGER_SECONDS after. */
+function actEffects(npc: NpcSnapshot, now: number): boolean {
+  if (npc.acting) return true;
+  const end = actEnd.get(npc.id);
   return end !== undefined && now - end <= LINGER_SECONDS;
 }
 
-/** True while a Shift Setup effect is showing on an NPC doing an anomaly. */
+/** True while a Shift Setup effect is showing on an NPC acting suspicious. */
 function effectOn(
   effect: AuraOverride,
   npc: NpcSnapshot,
   now: number,
 ): boolean {
-  if (!npc.suspicious) return false;
-  return now - (anomalyStart.get(npc.id) ?? now) < effect.seconds;
+  if (!npc.acting) return false;
+  return now - (actStart.get(npc.id) ?? now) < effect.seconds;
 }
 
 /** NPC sprite sheets, loaded once and shared by every feed. */
 const sheets = new Map<string, HTMLImageElement>();
 function npcSheet(name: string): HTMLImageElement | null {
   if (!sheets.size) {
-    for (const key of NPC_SHEETS) {
+    for (const key of [...NPC_SHEETS, OFFICER_SHEET]) {
       const image = new Image();
       image.src = npcSheetUrl(key);
       sheets.set(key, image);
@@ -193,9 +214,6 @@ export class FeedRenderer {
   private readonly calm = prefersReducedMotion();
   private glitch: { kind: GlitchKind; seed: number; reduced: boolean } | null =
     null;
-  /** Floor tile (centre) where an officer stands when nobody was there to check. */
-  private readonly unitSpot: Vec2 | null = null;
-  private unitOnScene = false;
   private boxes: MarkBox[] = [];
 
   constructor(
@@ -204,9 +222,9 @@ export class FeedRenderer {
     private readonly map: WorldMap | null,
     /** Shift level: picks how anomalies are highlighted (see drawPeople). */
     private readonly level = 1,
-    /** The player's own red-tint setting; null keeps the level's. */
+    /** The player's own tint setting; null keeps the level's. */
     private readonly highlight: AuraOverride | null = null,
-    /** The player's own ember-aura setting; null keeps the level's. */
+    /** The player's own pale ember-aura setting; null keeps the level's. */
     private readonly aura: AuraOverride | null = null,
   ) {
     this.ctx = canvas.getContext("2d")!;
@@ -226,21 +244,9 @@ export class FeedRenderer {
       this.minTileY = Math.min(...ys) - 1;
       this.tilesWide = Math.max(...xs) + 2 - this.minTileX;
       this.tilesHigh = Math.max(...ys) + 2 - this.minTileY;
-      // The visible floor tile nearest the middle of the view.
-      const floor = camera.visibleTiles.filter((i) => map.tiles[i] === "floor");
-      const cx = floor.reduce((s, i) => s + (i % map.width), 0) / floor.length;
-      const cy =
-        floor.reduce((s, i) => s + Math.floor(i / map.width), 0) / floor.length;
-      let best = Infinity;
-      for (const i of floor) {
-        const x = i % map.width;
-        const y = Math.floor(i / map.width);
-        const d = (x - cx) ** 2 + (y - cy) ** 2;
-        if (d < best) {
-          best = d;
-          this.unitSpot = { x: x + 0.5, y: y + 0.5 };
-        }
-      }
+    }
+    if (camera) {
+      shownCameras.set(camera.id, (shownCameras.get(camera.id) ?? 0) + 1);
     }
     if (feed.imageUrl) {
       const image = new Image();
@@ -254,6 +260,12 @@ export class FeedRenderer {
 
   destroy(): void {
     this.observer.disconnect();
+    const id = this.feed.source?.id;
+    if (id) {
+      const left = (shownCameras.get(id) ?? 1) - 1;
+      if (left > 0) shownCameras.set(id, left);
+      else shownCameras.delete(id);
+    }
   }
 
   /** Matches the canvas buffer to its on-screen size. Cheap when unchanged. */
@@ -280,11 +292,6 @@ export class FeedRenderer {
 
   setGlitch(kind: GlitchKind | null, reduced = false): void {
     this.glitch = kind ? { kind, seed: Math.random() * 1000, reduced } : null;
-  }
-
-  /** Shows an officer checking this feed's area (a report with nobody to check). */
-  setUnitOnScene(on: boolean): void {
-    this.unitOnScene = on;
   }
 
   /** Marked people seen in the last draw, for the overlay boxes. */
@@ -331,23 +338,25 @@ export class FeedRenderer {
     const r = Math.max(2, this.tileSize * 0.42);
     const size = Math.max(8, this.tileSize * NPC_FRAME_TILES);
     const now = snapshot?.t ?? t;
-    trackAnomalies(snapshot);
+    trackActs(snapshot);
     // Draw back to front so people lower on screen overlap those behind.
     const inView = (snapshot?.npcs ?? [])
       .filter((npc) => npc.cameraIds.includes(id))
       .sort((a, b) => a.y - b.y);
     for (const person of inView) {
       const mark = marks?.get(person.id);
-      // A captured suspect has stopped, even on a frame held after the shift.
+      // A captured suspect has stopped acting.
       const npc =
-        mark?.kind === "captured" ? { ...person, suspicious: false } : person;
+        mark?.kind === "captured"
+          ? { ...person, suspicious: false, acting: false }
+          : person;
       const x = this.viewX + (npc.x - this.minTileX) * this.tileSize;
       const y = this.viewY + (npc.y - this.minTileY) * this.tileSize;
-      if (mark) {
-        this.addBox(npc.id, mark, x, y, size);
-        // The officer stands beside them, facing them.
-        if (mark.unit) this.drawOfficer(f, x - size * 0.5, y, "right", size);
+      if (npc.role === "knight") {
+        this.drawKnight(f, npc, x, y, t, size);
+        continue;
       }
+      if (mark) this.addBox(npc.id, mark, x, y, size);
       const sheet = npcSheet(sheetFor(npc.id));
       if (sheet) {
         // Feet shadow, then the sprite frame standing on the NPC's position.
@@ -374,7 +383,7 @@ export class FeedRenderer {
         // Shift Setup can show the embers on any level, or time them.
         const embers = this.aura
           ? effectOn(this.aura, npc, now)
-          : this.level >= 3 && anomalyEffects(npc, now);
+          : this.level >= 3 && actEffects(npc, now);
         if (embers) {
           this.drawParticles(f, npc.id, x, y, size, now);
         }
@@ -393,7 +402,11 @@ export class FeedRenderer {
         Math.PI * 2,
       );
       f.fill();
-      f.fillStyle = npc.suspicious ? "#ff4040" : muted(npc.color);
+      f.fillStyle = npc.acting
+        ? this.level >= 3
+          ? "#ff4040"
+          : "#6fd88a"
+        : muted(npc.color);
       f.beginPath();
       f.arc(x, y, r, 0, Math.PI * 2);
       f.fill();
@@ -410,25 +423,23 @@ export class FeedRenderer {
       );
       f.fill();
     }
-    if (this.unitOnScene && this.unitSpot) {
-      const x = this.viewX + (this.unitSpot.x - this.minTileX) * this.tileSize;
-      const y = this.viewY + (this.unitSpot.y - this.minTileY) * this.tileSize;
-      this.drawOfficer(f, x, y, "down", size);
-    }
   }
 
-  /** A security officer standing with their feet at (x, feetY). */
-  private drawOfficer(
+  /** A knight sent after a report, with their feet at (x, feetY). */
+  private drawKnight(
     f: CanvasRenderingContext2D,
+    npc: NpcSnapshot,
     x: number,
     feetY: number,
-    facing: Facing,
+    t: number,
     size: number,
   ) {
     f.fillStyle = "rgba(0,0,0,0.4)";
     f.beginPath();
     f.ellipse(x, feetY, size * 0.2, size * 0.09, 0, 0, Math.PI * 2);
     f.fill();
+    const facing: Facing = facingFor(npc.facingDeg);
+    const col = npc.moving ? Math.floor(t * NPC_WALK_FPS) % 4 : 0;
     const sheet = npcSheet(OFFICER_SHEET);
     if (!sheet) {
       f.fillStyle = "#4d8fe0";
@@ -444,7 +455,7 @@ export class FeedRenderer {
     f.filter = OFFICER_FILTER;
     f.drawImage(
       sheet,
-      0,
+      col * NPC_FRAME,
       facingRow(facing) * NPC_FRAME,
       NPC_FRAME,
       NPC_FRAME,
@@ -482,37 +493,32 @@ export class FeedRenderer {
   }
 
   /**
-   * Normal people are dimmed to the monitor look. On level 1 an NPC doing an
-   * anomaly is tinted red the whole time. On levels 2 and 3 they only flash
-   * bright red twice when the anomaly starts (over 2s and 1s, FLASH_SECONDS)
-   * and then look normal again; level 3 also has rising red particles
-   * (drawParticles).
+   * Normal people are dimmed to the monitor look. On level 1 an NPC is tinted
+   * faint green while they act suspicious. On levels 2 and 3 they only flash
+   * twice when an act starts on screen (1s each, FLASH_SECONDS), green
+   * on level 2 and bright red on level 3, and then look normal again; level 3
+   * also has rising pale embers (drawParticles).
    */
   private npcFilter(npc: NpcSnapshot, now: number): string {
     const normal = "saturate(0.55) brightness(0.9)";
+    const red = this.level >= 3;
+    const tint = red ? RED_TINT : GREEN_TINT;
     if (this.highlight) {
-      // Shift Setup: a steady red tint for the first `seconds` of the anomaly.
-      return effectOn(this.highlight, npc, now)
-        ? "sepia(1) saturate(6) hue-rotate(-40deg) brightness(1.1) drop-shadow(0 0 2px #ff3030)"
-        : normal;
+      // Shift Setup: a steady tint for the first `seconds` of each act.
+      return effectOn(this.highlight, npc, now) ? tint : normal;
     }
     const flash = FLASH_SECONDS[this.level];
-    if (flash === undefined) {
-      return npc.suspicious
-        ? "sepia(1) saturate(6) hue-rotate(-40deg) brightness(1.1) drop-shadow(0 0 2px #ff3030)"
-        : normal;
-    }
-    // A short anomaly's flash keeps going for LINGER_SECONDS after it ends.
-    if (!anomalyEffects(npc, now)) return normal;
-    const since = now - (anomalyStart.get(npc.id) ?? now);
+    if (flash === undefined) return npc.acting ? tint : normal;
+    // A short act's flash keeps going for LINGER_SECONDS after it ends.
+    if (!actEffects(npc, now)) return normal;
+    const since = now - (actStart.get(npc.id) ?? now);
     // on, off, on, off (each a quarter of the flash), then back to normal.
     const on = since < flash && Math.floor(since / (flash / 4)) % 2 === 0;
-    return on
-      ? "sepia(1) saturate(10) hue-rotate(-50deg) brightness(1.8) drop-shadow(0 0 4px #ff0000)"
-      : normal;
+    if (!on) return normal;
+    return red ? RED_FLASH : GREEN_FLASH;
   }
 
-  /** Small red embers drifting up around an anomaly (level 3). */
+  /** Small pale cyan embers drifting up around a suspect acting (level 3). */
   private drawParticles(
     f: CanvasRenderingContext2D,
     npcId: string,
@@ -529,7 +535,7 @@ export class FeedRenderer {
       const drift = Math.sin(now * 2 + i * 1.7) * size * 0.06;
       const px = x + (hash(i, seed) - 0.5) * size * 0.55 + drift;
       const py = feetY - phase * size * 0.85;
-      f.fillStyle = `rgba(255,${Math.round(40 + 60 * hash(seed, i + 9))},40,${(1 - phase).toFixed(2)})`;
+      f.fillStyle = `rgba(${Math.round(150 + 80 * hash(seed, i + 9))},255,255,${(1 - phase).toFixed(2)})`;
       f.fillRect(Math.round(px), Math.round(py), dot, dot);
     }
   }

@@ -49,6 +49,7 @@ const FACE_DETECTOR_MODEL_URL =
 const SVG_NS = "http://www.w3.org/2000/svg";
 const PREVIEW_POSITION_KEY = "night-watch:camera-preview-position";
 const PREVIEW_HIDDEN_KEY = "night-watch:camera-preview-hidden";
+const PREVIEW_COLLAPSED_KEY = "night-watch:camera-preview-collapsed";
 const PREVIEW_MARGIN = 8;
 
 interface PreviewPosition {
@@ -79,17 +80,17 @@ function savePreviewPosition(position: PreviewPosition | null): void {
   }
 }
 
-function readPreviewHidden(): boolean {
+function readFlag(key: string): boolean {
   try {
-    return globalThis.localStorage?.getItem(PREVIEW_HIDDEN_KEY) === "true";
+    return globalThis.localStorage?.getItem(key) === "true";
   } catch {
     return false;
   }
 }
 
-function savePreviewHidden(hidden: boolean): void {
+function saveFlag(key: string, value: boolean): void {
   try {
-    localStorage.setItem(PREVIEW_HIDDEN_KEY, String(hidden));
+    localStorage.setItem(key, String(value));
   } catch (error) {
     console.error("Could not save the camera preview setting.", error);
   }
@@ -233,7 +234,10 @@ export class MediaPipeGazeTracker {
   private alignment: HeadAlignment = NOT_ALIGNED;
   private previewVisible = true;
   /** The player's choice to hide the preview, kept across sessions. */
-  private previewHidden = readPreviewHidden();
+  private previewHidden = readFlag(PREVIEW_HIDDEN_KEY);
+  /** Minimized to its title bar and status line, kept across sessions. */
+  private previewCollapsed = readFlag(PREVIEW_COLLAPSED_KEY);
+  private collapseButton: HTMLButtonElement | null = null;
   private previewHiddenListeners = new Set<(hidden: boolean) => void>();
   private showPreviewButton: HTMLButtonElement | null = null;
   private previewPosition: PreviewPosition | null = readPreviewPosition();
@@ -318,21 +322,27 @@ export class MediaPipeGazeTracker {
       const title = document.createElement("span");
       title.className = "cam-preview-title";
       title.textContent = "CAM_00 · OPERATOR";
+      // Minimize keeps the title bar and status line; close hides the whole
+      // window behind a "Show cam" button. Tracking runs either way.
+      const collapseButton = previewButton(
+        "cam-preview-btn",
+        "Minimize camera preview",
+        "_",
+      );
+      collapseButton.addEventListener("click", () => {
+        playSfx("click");
+        this.setPreviewCollapsed(!this.previewCollapsed);
+      });
       const hideButton = previewButton(
         "cam-preview-btn",
         "Hide camera preview",
-        "_",
+        "×",
       );
       hideButton.addEventListener("click", () => {
         playSfx("click");
         this.setPreviewHidden(true);
       });
-      const stopButton = previewButton("cam-preview-btn", "Stop camera", "×");
-      stopButton.addEventListener("click", () => {
-        playSfx("click");
-        this.stop();
-      });
-      titleBar.append(rec, title, hideButton, stopButton);
+      titleBar.append(rec, title, collapseButton, hideButton);
 
       const screen = document.createElement("div");
       screen.className = "cam-preview-screen";
@@ -366,9 +376,11 @@ export class MediaPipeGazeTracker {
       this.video = video;
       this.preview = preview;
       this.showPreviewButton = showButton;
+      this.collapseButton = collapseButton;
       this.overlay = overlay;
       this.renderPreviewStatus();
       this.applyPreviewVisibility();
+      this.applyPreviewCollapsed();
       this.enablePreviewDrag(preview);
 
       await video.play();
@@ -491,7 +503,7 @@ export class MediaPipeGazeTracker {
   setPreviewHidden(hidden: boolean): void {
     if (hidden === this.previewHidden) return;
     this.previewHidden = hidden;
-    savePreviewHidden(hidden);
+    saveFlag(PREVIEW_HIDDEN_KEY, hidden);
     this.applyPreviewVisibility();
     for (const listener of this.previewHiddenListeners) listener(hidden);
   }
@@ -499,6 +511,29 @@ export class MediaPipeGazeTracker {
   onPreviewHiddenChange(listener: (hidden: boolean) => void): () => void {
     this.previewHiddenListeners.add(listener);
     return () => this.previewHiddenListeners.delete(listener);
+  }
+
+  /** Minimizes the preview to its title bar and status line, or restores it. */
+  setPreviewCollapsed(collapsed: boolean): void {
+    if (collapsed === this.previewCollapsed) return;
+    this.previewCollapsed = collapsed;
+    saveFlag(PREVIEW_COLLAPSED_KEY, collapsed);
+    this.applyPreviewCollapsed();
+  }
+
+  private applyPreviewCollapsed(): void {
+    const preview = this.preview;
+    const button = this.collapseButton;
+    if (!preview || !button) return;
+    preview.classList.toggle("is-collapsed", this.previewCollapsed);
+    const label = this.previewCollapsed
+      ? "Restore camera preview"
+      : "Minimize camera preview";
+    button.textContent = this.previewCollapsed ? "□" : "_";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    // The height changed; keep the window on screen.
+    if (this.previewPosition) this.placePreview(this.previewPosition);
   }
 
   /** Lets the player drag the preview anywhere in the window, except by its buttons. */
@@ -867,6 +902,7 @@ export class MediaPipeGazeTracker {
     this.preview = null;
     this.showPreviewButton?.remove();
     this.showPreviewButton = null;
+    this.collapseButton = null;
     this.overlay = null;
     this.blinkDetector.reset();
     this.alignment = NOT_ALIGNED;

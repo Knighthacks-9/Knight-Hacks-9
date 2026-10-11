@@ -1,12 +1,18 @@
 // The investigation dispatch sends after the player files a report:
 // acknowledged → en_route → on_scene → resolved → closed.
 //
+// The Watch Station sends a knight (see InvestigationDeskOptions.unit): the
+// stages then follow the knight through the building instead of a timer, and
+// a suspect who gets out first is reported as escaped.
+//
 // The game decides WHAT happens: where the report was, whether the person was
 // really suspicious (ground truth from the world), and where they are now.
 // The AI dispatcher (writeDispatchLine) only decides HOW it's said, and every
 // stage has default lines (./defaultLines.ts) for when the AI is unavailable.
 import { FLAG_GRACE_SECONDS } from "../analytics";
 import type {
+  KnightOutcome,
+  KnightStatus,
   SuspiciousBehavior,
   WorldEvent,
   WorldMap,
@@ -41,6 +47,10 @@ export const LATE_CUTOFF_SECONDS = 10;
 export const END_MARGIN_SECONDS = 2;
 /** Start writing a line this long before it's due (the AI call times out at 2 s). */
 export const PREFETCH_LEAD_SECONDS = 2.5;
+/** With a knight: seconds from the acknowledgement to "knight on the way". */
+export const KNIGHT_EN_ROUTE_SECONDS = 3;
+/** With a knight: the case closes this long after the outcome at the latest. */
+export const KNIGHT_CLOSE_SECONDS = 8;
 
 /**
  * Shift times for each stage of an investigation opened at `now`, squeezed so
@@ -101,11 +111,15 @@ const place = (w: Whereabouts) =>
 const moved = (c: InvestigationCase, now: Whereabouts | null) =>
   now !== null && now.camera !== c.camera;
 
-/** The facts the AI may use for one stage. `now` is the person's location at on_scene. */
+/**
+ * The facts the AI may use for one stage. `now` is the person's location at
+ * on_scene; `outcome` is how the knight's job ended, when one was sent.
+ */
 export function investigationFacts(
   stage: InvestigationStage,
   c: InvestigationCase,
   now: Whereabouts | null,
+  outcome: KnightOutcome | null = null,
 ): string {
   const reported = c.reportedBehavior
     ? BEHAVIOR_PHRASES[c.reportedBehavior]
@@ -122,30 +136,33 @@ export function investigationFacts(
         .filter(Boolean)
         .join("\n");
     case "en_route":
-      return `A security unit is now heading to ${where(c)} to check the report of ${reported}.`;
+      return `The knight on duty is now heading to ${where(c)} to check the report of ${reported}.`;
     case "on_scene":
       if (!c.npcId) {
-        return `The unit has arrived at ${where(c)}. Nobody there matches the report.`;
+        return `The knight has arrived at ${where(c)}. Nobody there matches the report.`;
       }
       return [
         now === null
-          ? `The unit has arrived at ${where(c)}. The subject has left the monitored area.`
+          ? `The knight has arrived at ${where(c)}. The subject has left the monitored area.`
           : moved(c, now)
-            ? `The unit has arrived at ${where(c)}, but the subject has moved to ${place(now)}. The unit is following.`
-            : `The unit has arrived at ${where(c)} and has eyes on the subject.`,
+            ? `The knight has arrived at ${where(c)}, but the subject has moved to ${place(now)}. The knight is following.`
+            : `The knight has arrived at ${where(c)} and has eyes on the subject.`,
         c.suspect
           ? `The subject is ${BEHAVIOR_PHRASES[c.suspect]}.`
           : "The subject appears to be going about normal business.",
       ].join("\n");
     case "resolved":
+      if (outcome === "escaped" && c.suspect) {
+        return `Outcome: the subject left the building before the knight reached them. They were ${BEHAVIOR_PHRASES[c.suspect]}. The report was right but came too late.`;
+      }
       if (c.suspect) {
-        return `Outcome: the subject was detained${now ? ` at ${place(now)}` : ""}. Confirmed: they were ${BEHAVIOR_PHRASES[c.suspect]}.`;
+        return `Outcome: the knight detained the subject${now ? ` at ${place(now)}` : ""}. Confirmed: they were ${BEHAVIOR_PHRASES[c.suspect]}.`;
       }
       return c.npcId
         ? "Outcome: false report. The subject was not doing anything suspicious and has been cleared."
         : `Outcome: false report. Nothing suspicious was found at ${where(c)}. Area cleared.`;
     case "closed":
-      return `The incident at ${where(c)} is closed. Result: ${c.suspect ? "subject detained" : "false report, cleared"}. Tell control to stay on the feeds.`;
+      return `The incident at ${where(c)} is closed. Result: ${c.suspect ? (outcome === "escaped" ? "subject escaped" : "subject detained") : "false report, cleared"}. Tell control to stay on the feeds.`;
   }
 }
 
@@ -155,6 +172,7 @@ export function investigationTemplate(
   c: InvestigationCase,
   now: Whereabouts | null,
   random: () => number = Math.random,
+  outcome: KnightOutcome | null = null,
 ): string {
   const at = { CAM: String(c.camera), ROOM: c.location };
   switch (stage) {
@@ -177,6 +195,13 @@ export function investigationTemplate(
       }
       return fillLine("on_scene_still", at, random);
     case "resolved":
+      if (outcome === "escaped" && c.suspect) {
+        return fillLine(
+          "resolved_escaped",
+          { BEHAVIOR: BEHAVIOR_PHRASES[c.suspect] },
+          random,
+        );
+      }
       if (c.suspect) {
         return fillLine(
           "resolved_suspect",
@@ -284,6 +309,19 @@ export interface InvestigationLine {
   text: string;
   /** The report being investigated. */
   case: InvestigationCase;
+  /** How the knight's job ended, on resolved and closed lines (knight mode). */
+  outcome?: KnightOutcome;
+}
+
+/** The knight the desk sends for each report. */
+export interface InvestigationUnit {
+  /**
+   * Sends a knight for the case; returns their id, or null when no knight
+   * can go (that case then runs on STAGE_DELAYS).
+   */
+  dispatch(c: InvestigationCase): string | null;
+  /** Where that knight's job stands; null once they've left the building. */
+  status(unitId: string): KnightStatus | null;
 }
 
 export interface InvestigationDeskOptions {
@@ -298,12 +336,19 @@ export interface InvestigationDeskOptions {
   locate(npcId: string): Whereabouts | null;
   /** Show and speak a line (called in stage order per investigation). */
   deliver(line: InvestigationLine): void;
+  /**
+   * Sends a knight for each report. The stages then follow the knight
+   * (en route, arrived, outcome, gone) instead of STAGE_DELAYS.
+   */
+  unit?: InvestigationUnit;
   /** Swappable for tests. */
   write?: (stage: string, facts: string, template: string) => Promise<string>;
 }
 
 interface OpenInvestigation {
   case: InvestigationCase;
+  /** Stages still to run, in order: all of STAGES unless hurry() cut some. */
+  stages: InvestigationStage[];
   times: number[];
   next: number;
   /** The next stage's line, being written. */
@@ -311,6 +356,13 @@ interface OpenInvestigation {
   delivering: boolean;
   /** Where the person was when the unit arrived. */
   seen: Whereabouts | null;
+  located: boolean;
+  /** Knight mode: the knight sent, and what they last reported. */
+  unitId: string | null;
+  status: KnightStatus | null;
+  startedAt: number;
+  /** Shift time the outcome came in. */
+  resolvedAt: number | null;
 }
 
 /**
@@ -330,14 +382,25 @@ export class InvestigationDesk {
 
   /** True while any investigation still has lines to deliver. */
   get busy(): boolean {
-    return this.open.length > 0 || this.lateWrites > 0;
+    return !this.destroyed && (this.open.length > 0 || this.lateWrites > 0);
+  }
+
+  /** Lines still to be delivered across every open investigation. */
+  get remainingLines(): number {
+    return this.open.reduce(
+      (sum, inv) => sum + inv.stages.length - inv.next,
+      this.lateWrites,
+    );
   }
 
   /** Starts investigating a report filed at shift time t. */
   start(c: InvestigationCase, t: number): void {
     if (this.destroyed) return;
+    const { unit } = this.options;
     const end =
-      this.options.fitToShift === false ? Infinity : this.options.shiftSeconds;
+      this.options.fitToShift === false || unit
+        ? Infinity
+        : this.options.shiftSeconds;
     const times = planStageTimes(t, end);
     if (!times) {
       const { facts, template } = lateReportLine(c);
@@ -356,49 +419,151 @@ export class InvestigationDesk {
     }
     this.open.push({
       case: c,
+      stages: [...STAGES],
       times,
       next: 0,
       pending: null,
       delivering: false,
       seen: null,
+      located: false,
+      unitId: unit ? unit.dispatch(c) : null,
+      status: null,
+      startedAt: t,
+      resolvedAt: null,
     });
     this.update(t);
+  }
+
+  /** Knight mode: true once the knight has got far enough for `stage`. */
+  private unitReady(
+    inv: OpenInvestigation,
+    stage: InvestigationStage,
+    t: number,
+  ): boolean {
+    const status = inv.status;
+    switch (stage) {
+      case "acknowledged":
+        return true;
+      case "en_route":
+        return t >= inv.startedAt + KNIGHT_EN_ROUTE_SECONDS;
+      case "on_scene":
+        return status === null || status.phase !== "en_route";
+      case "resolved":
+        return status === null || status.outcome !== null;
+      case "closed":
+        return (
+          status === null ||
+          status.phase === "leaving" ||
+          (inv.resolvedAt !== null &&
+            t >= inv.resolvedAt + KNIGHT_CLOSE_SECONDS)
+        );
+    }
+  }
+
+  /** Knight mode: reads the knight's progress and drops stages it skipped. */
+  private followUnit(inv: OpenInvestigation, t: number): void {
+    const status = this.options.unit!.status(inv.unitId!);
+    if (status) inv.status = status;
+    else if (inv.status) {
+      // They left the building, so the job is over either way.
+      inv.status = {
+        ...inv.status,
+        phase: "leaving",
+        outcome: inv.status.outcome ?? (inv.case.npcId ? "escaped" : "nothing"),
+      };
+    }
+    if (inv.status?.outcome && inv.resolvedAt === null) inv.resolvedAt = t;
+    // An escape means the knight never arrived: skip the arrival line.
+    if (
+      inv.status?.outcome === "escaped" &&
+      inv.stages[inv.next] === "on_scene" &&
+      !inv.pending
+    ) {
+      inv.stages = inv.stages.filter((stage) => stage !== "on_scene");
+    }
   }
 
   update(t: number): void {
     if (this.destroyed) return;
     for (const inv of this.open) {
-      const stage = STAGES[inv.next];
+      if (inv.unitId) this.followUnit(inv, t);
+      const stage = inv.stages[inv.next];
       const due = inv.times[inv.next];
-      if (!inv.pending && t >= due - PREFETCH_LEAD_SECONDS) {
-        if (stage === "on_scene" && inv.case.npcId) {
+      // Knight mode writes each line as the knight gets there; the AI call
+      // is capped at 2 s, so it lands close behind.
+      const ready = inv.unitId
+        ? this.unitReady(inv, stage, t)
+        : t >= due - PREFETCH_LEAD_SECONDS;
+      if (!inv.pending && ready) {
+        // The unit finds the person on arrival (or at the outcome, when
+        // hurry() skipped the arrival).
+        if (
+          (stage === "on_scene" || stage === "resolved") &&
+          !inv.located &&
+          inv.case.npcId
+        ) {
           inv.seen = this.options.locate(inv.case.npcId);
+          inv.located = true;
+        }
+        const outcome = inv.status?.outcome ?? null;
+        // A knight reaches the person wherever they are now: the line names
+        // that place, and they haven't "moved" from it.
+        let told = inv.case;
+        let now = inv.seen;
+        if (inv.unitId && stage === "on_scene" && inv.seen) {
+          told = {
+            ...inv.case,
+            camera: inv.seen.camera ?? inv.case.camera,
+            location: inv.seen.location,
+          };
+          now = { camera: told.camera, location: told.location };
         }
         inv.pending = this.write(
           stage,
-          investigationFacts(stage, inv.case, inv.seen),
-          investigationTemplate(stage, inv.case, inv.seen),
+          investigationFacts(stage, told, now, outcome),
+          investigationTemplate(stage, told, now, Math.random, outcome),
         );
       }
-      if (inv.pending && !inv.delivering && t >= due) {
+      if (inv.pending && !inv.delivering && (inv.unitId || t >= due)) {
         inv.delivering = true;
         void inv.pending.then((text) => {
           if (this.destroyed) return;
+          const outcome = inv.status?.outcome;
           this.options.deliver({
             stage,
             camera: inv.case.camera,
             text,
             case: inv.case,
+            ...(outcome && (stage === "resolved" || stage === "closed")
+              ? { outcome }
+              : {}),
           });
           inv.next += 1;
           inv.pending = null;
           inv.delivering = false;
-          if (inv.next >= STAGES.length) {
+          if (inv.next >= inv.stages.length) {
             this.open = this.open.filter((other) => other !== inv);
           }
         });
       }
     }
+  }
+
+  /**
+   * The shift is over and dispatch is short on time: each investigation goes
+   * straight to its outcome (resolved) at shift time t, skipping the unit's
+   * travel and the closing line. A line already being written still goes out.
+   */
+  hurry(t: number): void {
+    if (this.destroyed) return;
+    for (const inv of this.open) {
+      const kept = inv.stages.slice(0, inv.next + (inv.pending ? 1 : 0));
+      inv.stages = kept.includes("resolved") ? kept : [...kept, "resolved"];
+      inv.times = inv.stages.map((_, i) =>
+        i < inv.next ? inv.times[i] : Math.min(inv.times[i] ?? t, t),
+      );
+    }
+    this.open = this.open.filter((inv) => inv.next < inv.stages.length);
   }
 
   /** Drops every open investigation (the shift is over). */
