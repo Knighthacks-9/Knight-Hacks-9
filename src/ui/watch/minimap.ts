@@ -114,7 +114,9 @@ export function createMinimap(onToggle?: () => void): Minimap {
         g.fillText(r.name, cx, cy);
       }
     }
-    // Cameras, labelled on the inward side so edge cameras stay readable.
+    // Cameras, labelled toward the middle of the room they hang in, so labels
+    // stay inside the canvas and neighbouring cameras (Office B / Server Room)
+    // don't overlap.
     g.font = "9px monospace";
     for (const cam of map.cameras) {
       const cx = (cam.x + 0.5) * TILE;
@@ -123,8 +125,15 @@ export function createMinimap(onToggle?: () => void): Minimap {
       g.beginPath();
       g.arc(cx, cy, 4, 0, Math.PI * 2);
       g.fill();
-      const right = cam.x > map.width / 2;
-      const below = cam.y > map.height / 2;
+      const room = map.rooms.find(
+        (r) =>
+          cam.x >= r.x &&
+          cam.x < r.x + r.w &&
+          cam.y >= r.y &&
+          cam.y < r.y + r.h,
+      ) ?? { x: 0, y: 0, w: map.width, h: map.height };
+      const right = cam.x + 0.5 > room.x + room.w / 2;
+      const below = cam.y + 0.5 > room.y + room.h / 2;
       g.textAlign = right ? "right" : "left";
       g.textBaseline = below ? "bottom" : "top";
       g.fillText(cam.name, cx + (right ? -6 : 6), cy + (below ? -6 : 6));
