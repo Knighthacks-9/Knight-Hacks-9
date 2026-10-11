@@ -214,6 +214,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
     "aria-valuemax": String(config.expectedAnomalies),
   });
   for (let i = 0; i < config.expectedAnomalies; i++) meter.append(h("i"));
+  meter.hidden = !plan.reportCounter;
   const reportButton = h("button", {
     type: "button",
     class: "report-btn",
@@ -245,9 +246,10 @@ export const mountWatchStation: Screen = (ctx, params) => {
       },
       "?",
     ),
+    // Shift Setup can hide the count (it is off on Normal and Hard).
     h(
       "div",
-      { class: "rc-row" },
+      { class: "rc-row", hidden: !plan.reportCounter },
       h("span", { class: "rc-label" }, "SIGHTINGS"),
       count,
     ),

@@ -28,6 +28,8 @@ export interface ShiftSettings {
   distractions: DistractionRate;
   /** Whether feeds glitch now and then. */
   glitches: boolean;
+  /** Whether the Watch Station shows how many sightings were reported. */
+  reportCounter: boolean;
   /** Red tint on the sprite of a person doing an anomaly. */
   highlight: AuraMode;
   /** How long a timed highlight lasts after the anomaly starts. */
@@ -45,6 +47,7 @@ export const DEFAULT_SHIFT_SETTINGS: ShiftSettings = {
   npcRate: "normal",
   distractions: "normal",
   glitches: true,
+  reportCounter: true,
   highlight: "auto",
   highlightSeconds: 3,
   aura: "auto",
@@ -120,6 +123,8 @@ export function sanitizeShiftSettings(value: unknown): ShiftSettings {
       ? (v.distractions as DistractionRate)
       : d.distractions,
     glitches: typeof v.glitches === "boolean" ? v.glitches : d.glitches,
+    reportCounter:
+      typeof v.reportCounter === "boolean" ? v.reportCounter : d.reportCounter,
     highlight: auraMode(v.highlight, d.highlight),
     highlightSeconds: auraSeconds(v.highlightSeconds, d.highlightSeconds),
     aura: auraMode(v.aura, d.aura),
@@ -149,14 +154,29 @@ export function isCustomized(settings: ShiftSettings): boolean {
   return settings.custom;
 }
 
-/** Crowd, pop-ups and glitches each difficulty level starts from. */
+/** Crowd, pop-ups, glitches and report counter each difficulty starts from. */
 const LEVEL_PRESETS: Record<
   number,
-  Pick<ShiftSettings, "npcRate" | "distractions" | "glitches">
+  Pick<ShiftSettings, "npcRate" | "distractions" | "glitches" | "reportCounter">
 > = {
-  1: { npcRate: "low", distractions: "low", glitches: false },
-  2: { npcRate: "normal", distractions: "normal", glitches: true },
-  3: { npcRate: "high", distractions: "high", glitches: true },
+  1: {
+    npcRate: "low",
+    distractions: "low",
+    glitches: false,
+    reportCounter: true,
+  },
+  2: {
+    npcRate: "normal",
+    distractions: "normal",
+    glitches: true,
+    reportCounter: false,
+  },
+  3: {
+    npcRate: "high",
+    distractions: "high",
+    glitches: true,
+    reportCounter: false,
+  },
 };
 
 /** The options a difficulty level selects on its own. */
@@ -197,6 +217,8 @@ export interface ShiftPlan {
   /** Multiplier on pop-up frequency; 0 means none. */
   distractionFrequency: number;
   glitches: boolean;
+  /** Show the sightings count and meter in the Watch Station. */
+  reportCounter: boolean;
   /** Red sprite tint; null keeps the level's own. */
   highlight: AuraOverride | null;
   /** Rising embers; null keeps the level's own. */
@@ -223,6 +245,7 @@ export function planShift(
     },
     distractionFrequency: DISTRACTION_FREQUENCY[settings.distractions],
     glitches: settings.glitches,
+    reportCounter: settings.reportCounter,
     highlight: override(settings.highlight, settings.highlightSeconds),
     aura: override(settings.aura, settings.auraSeconds),
   };
