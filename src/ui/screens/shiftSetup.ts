@@ -25,6 +25,7 @@ import {
   isCustomized,
   planShift,
   saveShiftSettings,
+  toCustom,
 } from "../shiftSettings";
 import { bringToFront, openFloatingWindow } from "../window";
 
@@ -64,11 +65,20 @@ export function openShiftSetup(ctx: AppContext): void {
     notifyShiftSettings(ctx);
   };
 
-  /** A difficulty preset is in force: the options below it are read-only. */
+  /** A difficulty preset is in force: the options below it are greyed out. */
   const locked = () => !state.settings.custom;
   /** What the controls show: the player's options, or the preset's. */
   const view = () =>
     effectiveSettings(levelConfig(state.level), state.settings);
+  /**
+   * Switches to Custom from the preset on screen, before a greyed-out
+   * option applies. Returns true if it switched.
+   */
+  const unlock = (lockable: boolean) => {
+    if (!lockable || !locked()) return false;
+    state.settings = toCustom(levelConfig(state.level), state.settings);
+    return true;
+  };
 
   function row(
     label: string,
@@ -102,7 +112,8 @@ export function openShiftSetup(ctx: AppContext): void {
           type: "button",
           class: "btn95 setup-option",
           onclick: () => {
-            if (get() === value) return;
+            const unlocked = unlock(lockable);
+            if (get() === value && !unlocked) return;
             set(value);
             changed();
           },
@@ -113,7 +124,6 @@ export function openShiftSetup(ctx: AppContext): void {
     refreshers.push(() =>
       buttons.forEach((button, i) => {
         button.setAttribute("aria-pressed", String(options[i][0] === get()));
-        button.disabled = lockable && locked();
       }),
     );
     return h("div", { class: "setup-choice" }, ...buttons);
@@ -130,25 +140,23 @@ export function openShiftSetup(ctx: AppContext): void {
       class: "menu-shift-value",
       "aria-live": "polite",
     });
-    const buttons: HTMLButtonElement[] = [];
     refreshers.push(() => {
       value.textContent = text();
-      for (const b of buttons) b.disabled = lockable && locked();
     });
-    const button = (dir: number, glyph: string, label: string) => {
-      const b = h(
+    const button = (dir: number, glyph: string, label: string) =>
+      h(
         "button",
         {
           type: "button",
           class: "btn95 btn-sq",
           "aria-label": `${label} ${name}`,
-          onclick: () => changed(step(dir) ? "blip" : "deny"),
+          onclick: () => {
+            const unlocked = unlock(lockable);
+            changed(step(dir) || unlocked ? "blip" : "deny");
+          },
         },
         glyph,
       );
-      buttons.push(b);
-      return b;
-    };
     return h(
       "div",
       { class: "menu-shift" },
@@ -189,13 +197,11 @@ export function openShiftSetup(ctx: AppContext): void {
       const value = view()[mode];
       length.hidden = value !== "timed";
       note.textContent =
-        value === "auto"
-          ? "Follows the difficulty."
-          : value === "always"
-            ? `${what} for as long as the anomaly lasts.`
-            : value === "timed"
-              ? `${what} for the first ${view()[seconds]}s of each anomaly.`
-              : `No ${label.toLowerCase()}.`;
+        value === "always"
+          ? `${what} for as long as the anomaly lasts.`
+          : value === "timed"
+            ? `${what} for the first ${view()[seconds]}s of each anomaly.`
+            : `No ${label.toLowerCase()}.`;
     });
     return row(
       label,
@@ -217,8 +223,8 @@ export function openShiftSetup(ctx: AppContext): void {
     const level = levelConfig(state.level);
     const { config } = planShift(level, state.shiftSeconds, state.settings);
     difficultyNote.textContent = locked()
-      ? (DIFFICULTY_NOTE[level.level - 1] ?? "")
-      : `Set every option yourself. Auto options follow ${DIFFICULTY[level.level - 1]}.`;
+      ? `${DIFFICULTY_NOTE[level.level - 1] ?? ""} Change any option to switch to Custom.`
+      : "Set every option yourself.";
     rowsEl.classList.toggle("is-locked", locked());
     summary.textContent =
       `NEXT SHIFT: ${mmss(config.durationSeconds)} · ${config.cameraCount} cameras · ` +
@@ -236,9 +242,14 @@ export function openShiftSetup(ctx: AppContext): void {
         ],
         () => (state.settings.custom ? CUSTOM : state.level),
         (value) => {
-          // A level locks the options to its preset; Custom frees them.
-          state.settings.custom = value === CUSTOM;
-          if (value !== CUSTOM) state.level = value;
+          // A level locks the options to its preset; Custom frees them,
+          // starting from the preset that was on screen.
+          if (value === CUSTOM) {
+            state.settings = toCustom(levelConfig(state.level), state.settings);
+          } else {
+            state.settings.custom = false;
+            state.level = value;
+          }
         },
         false,
       ),
@@ -270,8 +281,8 @@ export function openShiftSetup(ctx: AppContext): void {
     ),
     row(
       "Cameras",
-      choice<number | null>(
-        [[null, "Auto"], ...CAMERA_OPTIONS.map((n) => [n, String(n)] as const)],
+      choice(
+        CAMERA_OPTIONS.map((n) => [n, String(n)] as const),
         () => view().cameraCount,
         (count) => (state.settings.cameraCount = count),
       ),
@@ -280,24 +291,18 @@ export function openShiftSetup(ctx: AppContext): void {
       "Anomalies",
       stepper(
         "anomalies",
-        () => String(view().anomalies ?? "AUTO"),
+        () => String(view().anomalies),
         (dir) => {
-          // AUTO sits below the minimum: 1 then "-" goes back to AUTO.
-          const current = state.settings.anomalies;
-          const next =
-            current === null
-              ? dir > 0
-                ? MIN_ANOMALIES
-                : null
-              : current + dir < MIN_ANOMALIES
-                ? null
-                : Math.min(MAX_ANOMALIES, current + dir);
-          if (next === current) return false;
+          const next = Math.min(
+            MAX_ANOMALIES,
+            Math.max(MIN_ANOMALIES, state.settings.anomalies + dir),
+          );
+          if (next === state.settings.anomalies) return false;
           state.settings.anomalies = next;
           return true;
         },
       ),
-      h("p", { class: "setup-note" }, "Auto follows the difficulty."),
+      h("p", { class: "setup-note" }, `${MIN_ANOMALIES} to ${MAX_ANOMALIES}.`),
     ),
     effect(
       "Red highlight",
