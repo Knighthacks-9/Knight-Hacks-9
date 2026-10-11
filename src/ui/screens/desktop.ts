@@ -77,7 +77,7 @@ const CREDITS = [
   "",
   "Karam Hack",
   "   University of Central Florida",
-  "   Master's student, Cybersecurity",
+  "   Graduate student, Cybersecurity",
   "   https://www.linkedin.com/in/karamhack/",
   "   Contributions:",
   "    - CCTV Gameplay",
