@@ -94,6 +94,7 @@ describe("local NightwatchService", () => {
       reportNumber: 1,
       cameraId: "cam2",
       duplicate: false,
+      suspect: null,
     });
     expect(flags).toHaveLength(1);
     expect(flags[0].npcId).toBe("none:cam2");

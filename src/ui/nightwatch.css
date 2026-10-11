@@ -1096,8 +1096,9 @@ body.nw {
 
 .calib-align-monitor {
   position: relative;
-  width: min(620px, 100%, calc((100vh - 330px) * 4 / 3));
-  min-width: 240px;
+  /* --frame-ratio is the camera's width / height, set once it is known. */
+  width: min(620px, 100%, calc((100dvh - 330px) * var(--frame-ratio, 16 / 9)));
+  min-width: min(240px, 100%);
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: #05070a;
@@ -1158,13 +1159,6 @@ body.nw {
   vector-effect: non-scaling-stroke;
 }
 
-.calib-align-trail {
-  stroke: rgba(242, 193, 78, 0.6);
-  stroke-width: 2;
-  stroke-dasharray: 2 6;
-  vector-effect: non-scaling-stroke;
-}
-
 .calib-align-marker {
   fill: none;
   stroke: var(--amber-text);
@@ -1181,10 +1175,6 @@ body.nw {
 .calib-align-monitor[data-aligned="true"]
   :is(.calib-align-eyes, .calib-align-marker) {
   stroke: var(--green-text);
-}
-
-.calib-align-monitor[data-aligned="true"] .calib-align-trail {
-  visibility: hidden;
 }
 
 .calib-align-hint {
@@ -3096,4 +3086,30 @@ body.nw {
   color: var(--dim);
   font-size: 18px;
   letter-spacing: 3px;
+}
+
+/* Main menu: premium feature settings (realistic voice, AI dispatcher). */
+.menu-premium .menu-premium-row {
+  margin-top: 12px;
+}
+
+.menu-premium-toggle {
+  min-width: 128px;
+}
+
+.menu-premium.is-unsupported .menu-label,
+.menu-premium.is-unsupported .menu-premium-toggle {
+  color: var(--lo);
+  text-shadow: 1px 1px 0 var(--hi);
+}
+
+.menu-premium.is-unsupported .menu-premium-toggle {
+  cursor: not-allowed;
+}
+
+.menu-premium-note {
+  margin: 4px 0 0;
+  color: var(--lo);
+  font-size: 17px;
+  text-align: center;
 }
