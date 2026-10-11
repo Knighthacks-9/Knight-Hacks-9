@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ShiftReport } from "../../shared/types";
-import { buildShiftResult, gradeFor } from "./shiftResult";
+import {
+  MISSED_PREFIX,
+  buildShiftResult,
+  coachingNotes,
+  gradeFor,
+  missedAnomalyNotes,
+} from "./shiftResult";
 import type { ShiftTelemetry } from "./types";
 
 const cameras = [
@@ -172,8 +178,32 @@ describe("buildShiftResult", () => {
 
   it("writes coaching notes", () => {
     expect(result.coaching.length).toBeGreaterThan(0);
-    expect(result.coaching.length).toBeLessThanOrEqual(3);
+    expect(coachingNotes(result).length).toBeLessThanOrEqual(3);
     expect(result.coaching[0]).toContain("CAM_02 Hall West");
+  });
+
+  it("names each missed anomaly in the coaching notes", () => {
+    const missed = result.coaching.filter((n) => n.startsWith(MISSED_PREFIX));
+    expect(missed).toEqual([
+      "MISSED: Entering a restricted room on CAM_02 Hall West at 00:40-00:50. You watched it for 2s but did not report it.",
+    ]);
+  });
+
+  it("says why an unwatched anomaly was missed", () => {
+    const unseen = {
+      ...report.events[1],
+      outcome: "missed-not-looking" as const,
+      watchedSeconds: 0,
+      end: null,
+    };
+    expect(
+      missedAnomalyNotes({ ...report, events: [unseen] }, cameras),
+    ).toEqual([
+      "MISSED: Entering a restricted room on CAM_02 Hall West from 00:40. You were not looking at that feed.",
+    ]);
+    expect(
+      missedAnomalyNotes({ ...report, events: [unseen] }, [])[0],
+    ).toContain("outside your feeds");
   });
 });
 

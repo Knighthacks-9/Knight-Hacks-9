@@ -22,6 +22,7 @@ import {
 } from "../../shared/npcSprites";
 import { prefersReducedMotion } from "../dom";
 import type { CameraFeed } from "../service";
+import type { AuraOverride } from "../shiftSettings";
 
 /** CSS pixels per canvas pixel. */
 const PIXEL = 2;
@@ -87,6 +88,16 @@ function anomalyEffects(npc: NpcSnapshot, now: number): boolean {
   if (npc.suspicious) return true;
   const end = anomalyEnd.get(npc.id);
   return end !== undefined && now - end <= LINGER_SECONDS;
+}
+
+/** True while a Shift Setup effect is showing on an NPC doing an anomaly. */
+function effectOn(
+  effect: AuraOverride,
+  npc: NpcSnapshot,
+  now: number,
+): boolean {
+  if (!npc.suspicious) return false;
+  return now - (anomalyStart.get(npc.id) ?? now) < effect.seconds;
 }
 
 /** NPC sprite sheets, loaded once and shared by every feed. */
@@ -162,6 +173,10 @@ export class FeedRenderer {
     private readonly map: WorldMap | null,
     /** Shift level: picks how anomalies are highlighted (see drawPeople). */
     private readonly level = 1,
+    /** The player's own red-tint setting; null keeps the level's. */
+    private readonly highlight: AuraOverride | null = null,
+    /** The player's own ember-aura setting; null keeps the level's. */
+    private readonly aura: AuraOverride | null = null,
   ) {
     this.ctx = canvas.getContext("2d")!;
     this.grainPattern = this.ctx.createPattern(grainTile(), "repeat");
@@ -284,7 +299,11 @@ export class FeedRenderer {
           Math.round(size),
         );
         f.filter = "none";
-        if (this.level >= 3 && anomalyEffects(npc, now)) {
+        // Shift Setup can show the embers on any level, or time them.
+        const embers = this.aura
+          ? effectOn(this.aura, npc, now)
+          : this.level >= 3 && anomalyEffects(npc, now);
+        if (embers) {
           this.drawParticles(f, npc.id, x, y, size, now);
         }
         continue;
@@ -330,6 +349,12 @@ export class FeedRenderer {
    */
   private npcFilter(npc: NpcSnapshot, now: number): string {
     const normal = "saturate(0.55) brightness(0.9)";
+    if (this.highlight) {
+      // Shift Setup: a steady red tint for the first `seconds` of the anomaly.
+      return effectOn(this.highlight, npc, now)
+        ? "sepia(1) saturate(6) hue-rotate(-40deg) brightness(1.1) drop-shadow(0 0 2px #ff3030)"
+        : normal;
+    }
     const flash = FLASH_SECONDS[this.level];
     if (flash === undefined) {
       return npc.suspicious

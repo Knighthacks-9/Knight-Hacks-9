@@ -38,9 +38,9 @@ import type {
 } from "./types";
 
 export const LEVELS: readonly LevelConfig[] = [
-  { level: 1, cameraCount: 4, expectedAnomalies: 3 },
-  { level: 2, cameraCount: 6, expectedAnomalies: 5 },
-  // Same six cameras as level 2 (the world has six), with more anomalies.
+  { level: 1, cameraCount: 2, expectedAnomalies: 3 },
+  { level: 2, cameraCount: 4, expectedAnomalies: 5 },
+  // Every camera the world has.
   { level: 3, cameraCount: 6, expectedAnomalies: 8 },
 ];
 
@@ -191,15 +191,22 @@ export function createLocalNightwatchService(
       // synchronously, so listen before starting it.
       const onMap = (m: WorldMap) => (map = m);
       bus.on("world:map", onMap);
-      const world = startWorld({ shiftSeconds: config.durationSeconds, bus });
+      const scheduled = worldEventCount(config.durationSeconds);
+      // A count the player chose is exact; otherwise the world keeps its own.
+      const worldEvents = config.fixedAnomalies
+        ? Math.min(config.expectedAnomalies, scheduled)
+        : scheduled;
+      const world = startWorld({
+        shiftSeconds: config.durationSeconds,
+        anomalyCount: worldEvents,
+        spawnRate: config.npcSpawnRate,
+        bus,
+      });
       bus.off("world:map", onMap);
       if (!map) throw new Error("The world did not publish its map.");
       const cameras = camerasFor(map, config.cameraCount);
 
-      const extra = Math.max(
-        0,
-        config.expectedAnomalies - worldEventCount(config.durationSeconds),
-      );
+      const extra = Math.max(0, config.expectedAnomalies - worldEvents);
       const from = config.durationSeconds * 0.1;
       const to = Math.max(
         from + 1,
