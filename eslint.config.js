@@ -2,7 +2,10 @@ import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/**", "node_modules/**", "coverage/**"] },
+  {
+    // .netlify holds the functions bundled by `npm run dev:netlify`.
+    ignores: ["dist/**", "node_modules/**", "coverage/**", ".netlify/**"],
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {

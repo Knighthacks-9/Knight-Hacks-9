@@ -1,7 +1,12 @@
 import Phaser from "phaser";
-import { playSfx } from "../audio";
+import { SuspectLedger, locateNpc, playSfx } from "../audio";
 import { eventBus } from "../shared/eventBus";
-import type { ShiftReport, WorldMap, WorldSnapshot } from "../shared/types";
+import type {
+  ShiftReport,
+  WorldEvent,
+  WorldMap,
+  WorldSnapshot,
+} from "../shared/types";
 import { gazeController } from "../vision";
 import { startWorld, type WorldHandle } from "../world";
 import { CameraFeed } from "./CameraFeed";
@@ -71,8 +76,14 @@ export class ShiftScene extends Phaser.Scene {
     const onSnapshot = (snapshot: WorldSnapshot) => (this.snapshot = snapshot);
     const onReport = (report: ShiftReport) =>
       this.registry.set(REPORT_KEY, report);
+    // Ground truth for the dispatcher's investigations.
+    const ledger = new SuspectLedger();
+    const onSuspiciousStart = (e: WorldEvent) => ledger.record(e, "start");
+    const onSuspiciousEnd = (e: WorldEvent) => ledger.record(e, "end");
     eventBus.on("world:snapshot", onSnapshot);
     eventBus.on("analytics:report", onReport);
+    eventBus.on("world:suspiciousStart", onSuspiciousStart);
+    eventBus.on("world:suspiciousEnd", onSuspiciousEnd);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       // An unfinished report or open transmission is dropped with the shift.
       this.panel.destroy();
@@ -80,6 +91,8 @@ export class ShiftScene extends Phaser.Scene {
       this.world = null;
       eventBus.off("world:snapshot", onSnapshot);
       eventBus.off("analytics:report", onReport);
+      eventBus.off("world:suspiciousStart", onSuspiciousStart);
+      eventBus.off("world:suspiciousEnd", onSuspiciousEnd);
     });
 
     // startWorld emits world:map synchronously, so listen first.
@@ -98,6 +111,11 @@ export class ShiftScene extends Phaser.Scene {
         `CAM ${i + 1} · ${feed.camera.name.toUpperCase()}`,
       ]),
     );
+    const shownFeeds = this.feeds.map((feed) => ({
+      id: feed.camera.id,
+      location: feed.camera.name,
+    }));
+    const worldMap: WorldMap = map;
     this.panel = new ControlPanel(
       this,
       panelX,
@@ -107,6 +125,17 @@ export class ShiftScene extends Phaser.Scene {
       {
         feedLabel: (cameraId) => labels.get(cameraId) ?? cameraId,
         now: () => this.t,
+        shiftSeconds: this.shiftSeconds,
+        feedInfo: (cameraId) => {
+          const index = shownFeeds.findIndex((f) => f.id === cameraId);
+          return {
+            camera: index + 1,
+            location: shownFeeds[index]?.location ?? cameraId,
+          };
+        },
+        locate: (npcId) =>
+          locateNpc(this.snapshot, worldMap, shownFeeds, npcId),
+        suspectBehavior: (npcId, t) => ledger.behaviorAt(npcId, t),
       },
     );
     // Clicking anywhere on a feed picks it in step 1 of a report. (Clicks on
@@ -187,6 +216,7 @@ export class ShiftScene extends Phaser.Scene {
     const dt = Math.min(delta / 1000, MAX_DT);
     this.t += dt;
     eventBus.emit("sim:tick", { dt, t: this.t }); // world replies with world:snapshot
+    this.panel.update(this.t);
 
     const now = performance.now();
     const source = gazeController.getSource(now);

@@ -1,5 +1,14 @@
 import Phaser from "phaser";
+import {
+  debriefFacts,
+  debriefInput,
+  debriefTemplate,
+  speak,
+  stopSpeaking,
+  writeDispatchLine,
+} from "../audio";
 import type { ShiftReport } from "../shared/types";
+import { buildMap } from "../world";
 import {
   FEED_LIMIT_KEY,
   LEVELS,
@@ -40,10 +49,11 @@ export class DebriefScene extends Phaser.Scene {
         22,
       );
       addText(this, 232, `Score ${report.score}`, 20, "#9ca3af");
+      this.dispatcherSummary(report);
       if (!passed) {
         addText(
           this,
-          290,
+          302,
           report.completed
             ? "Report at least half of them, with no more false reports than correct ones."
             : "You ended the shift early.",
@@ -57,7 +67,7 @@ export class DebriefScene extends Phaser.Scene {
       const feedLimit =
         (this.registry.get(FEED_LIMIT_KEY) as number | undefined) ?? Infinity;
       const next = getFeedLayout(level + 1, feedLimit).screens;
-      addText(this, 290, `Next shift: ${next} screens`, 20, "#fbbf24");
+      addText(this, 302, `Next shift: ${next} screens`, 20, "#fbbf24");
       addButton(this, 360, "Next level", "Shift", () =>
         this.registry.set(LEVEL_KEY, level + 1),
       );
@@ -82,5 +92,33 @@ export class DebriefScene extends Phaser.Scene {
             ?.scrollIntoView({ behavior: "smooth", block: "start" }),
         );
     }
+  }
+
+  /** The dispatcher's end-of-shift line: shown under the score and spoken. */
+  private dispatcherSummary(report: ShiftReport): void {
+    // report.feeds lists the shown cameras in grid order.
+    const names = new Map(buildMap().cameras.map((c) => [c.id, c.name]));
+    const input = debriefInput(
+      report,
+      report.feeds.map((f) => ({
+        id: f.cameraId,
+        location: names.get(f.cameraId) ?? f.cameraId,
+      })),
+    );
+    const template = debriefTemplate(input);
+    const line = addText(this, 266, `DISPATCH: ${template}`, 14, "#93c5fd");
+    line.setWordWrapWidth(this.scale.width - 80);
+    let left = false;
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      left = true;
+      stopSpeaking();
+    });
+    void writeDispatchLine("debrief", debriefFacts(input), template).then(
+      (text) => {
+        if (left) return;
+        line.setText(`DISPATCH: ${text}`);
+        void speak(text).catch(() => undefined);
+      },
+    );
   }
 }

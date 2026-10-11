@@ -9,6 +9,7 @@ import {
   playSfx,
   startListening,
   stopSpeaking,
+  voiceInputSupported,
   type Transmission,
 } from "../../audio";
 import type { VoiceProvider } from "../../shared/types";
@@ -35,13 +36,7 @@ const BARS = 28;
 
 /** True when some form of speech input could work in this browser. */
 export function voiceInputAvailable(): boolean {
-  const w = window as unknown as Record<string, unknown>;
-  return Boolean(
-    w.SpeechRecognition ||
-    w.webkitSpeechRecognition ||
-    (typeof navigator.mediaDevices?.getUserMedia === "function" &&
-      typeof MediaRecorder !== "undefined"),
-  );
+  return voiceInputSupported();
 }
 
 export class DispatchRadio {
