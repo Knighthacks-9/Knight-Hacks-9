@@ -130,3 +130,29 @@ describe("short shifts", () => {
     expect(Math.max(...times) - Math.min(...times)).toBeGreaterThan(5);
   });
 });
+
+describe("shift options", () => {
+  function run(opts: { anomalyCount?: number; spawnRate?: number }) {
+    const bus = mitt<AppEvents>();
+    const suspects = new Set<string>();
+    let peak = 0;
+    bus.on("world:suspiciousStart", (e) => suspects.add(e.npcId));
+    bus.on("world:snapshot", (s) => (peak = Math.max(peak, s.npcs.length)));
+    const world = startWorld({ bus, seed: 5, shiftSeconds: 200, ...opts });
+    const dt = 1 / 10;
+    for (let t = dt; t <= 400; t += dt) bus.emit("sim:tick", { dt, t });
+    world.stop();
+    return { suspects: suspects.size, peak };
+  }
+
+  it("schedules exactly the requested number of anomalies", () => {
+    expect(run({ anomalyCount: 1 }).suspects).toBe(1);
+    expect(run({ anomalyCount: 7 }).suspects).toBe(7);
+  });
+
+  it("fills the building faster at a higher spawn rate", () => {
+    expect(run({ spawnRate: 1.75 }).peak).toBeGreaterThan(
+      run({ spawnRate: 0.5 }).peak,
+    );
+  });
+});
