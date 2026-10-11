@@ -4,10 +4,11 @@
 // dispatcher never stalls and never says anything the game didn't decide.
 // The AI is a premium feature (see ./premium.ts): the player can turn it off,
 // and ?ai=off skips it.
+import { apiUrl } from "./api";
 import { premium } from "./premium";
 import { speak } from "./voice";
 
-const DISPATCH_URL = "/api/dispatch";
+const DISPATCH_URL = apiUrl("/api/dispatch");
 export const DISPATCH_TIMEOUT_MS = 2000;
 
 /**

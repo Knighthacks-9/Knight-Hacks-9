@@ -1,9 +1,10 @@
 // The AI Dispatch Radio in the Watch Station side console: a desktop radio
-// with an LCD, LEDs, waveform, an unmute button, and push-to-talk.
+// with an LCD, LEDs, waveform, an unmute button, an auto-play switch, and
+// push-to-talk.
 //
 // idle      "CHANNEL OPEN", unmute disabled
 // incoming  a transmission is waiting; RX flashes; audio stays muted
-// playing   the player unmuted; dispatcher audio plays
+// playing   the player unmuted (or auto-play is on); dispatcher audio plays
 // listening push-to-talk is open (or transcribing)
 import {
   playSfx,
@@ -23,6 +24,10 @@ export interface RadioMessage {
   text: string;
   /** Plays the audio; resolves when it finishes. */
   play(): Promise<unknown>;
+  /** Called as the player starts hearing this message. */
+  onStart?(): void;
+  /** Called when it finishes playing. */
+  onEnd?(): void;
 }
 
 export interface RadioOptions {
@@ -33,6 +38,23 @@ export interface RadioOptions {
 }
 
 const BARS = 28;
+const AUTO_PLAY_KEY = "night-watch:radio-autoplay";
+
+function loadAutoPlay(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(AUTO_PLAY_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+function saveAutoPlay(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_PLAY_KEY, on ? "on" : "off");
+  } catch {
+    // Private mode or blocked storage: the switch just isn't remembered.
+  }
+}
 
 /** True when some form of speech input could work in this browser. */
 export function voiceInputAvailable(): boolean {
@@ -44,6 +66,12 @@ export class DispatchRadio {
   state: RadioState = "idle";
   private queue: (RadioMessage & { arrivedAt: number })[] = [];
   private current: RadioMessage | null = null;
+  /** Messages received but still in their arrival delay. */
+  private inbound = 0;
+  /** The player's AUTO-PLAY switch. */
+  private autoPlay = loadAutoPlay();
+  /** Set by drain(): play everything regardless of the switch. */
+  private draining = false;
   private transmission: Transmission | null = null;
   private transcribing = false;
   private pressedAt = 0;
@@ -59,6 +87,8 @@ export class DispatchRadio {
   private readonly bars: HTMLElement[];
   private readonly leds: Record<"link" | "rx" | "tx", HTMLElement>;
   private readonly unmuteButton: HTMLButtonElement;
+  private readonly autoButton: HTMLButtonElement;
+  private readonly autoState: HTMLElement;
   private readonly talkButton: HTMLButtonElement;
   private readonly talkHint: HTMLElement;
 
@@ -98,6 +128,19 @@ export class DispatchRadio {
         onclick: () => this.unmute(),
       },
       "NO INCOMING AUDIO",
+    );
+    this.autoState = h("span", { class: "radio-auto-state" });
+    this.autoButton = h(
+      "button",
+      {
+        type: "button",
+        class: "radio-btn radio-auto",
+        title: "Play each dispatch as it comes in, without unmuting",
+        onclick: () => this.setAutoPlay(!this.autoPlay),
+      },
+      h("i", { class: "radio-auto-led", "aria-hidden": "true" }),
+      h("span", null, "AUTO-PLAY DISPATCHES"),
+      this.autoState,
     );
     this.talkHint = h(
       "span",
@@ -151,20 +194,45 @@ export class DispatchRadio {
         this.leds.tx,
       ),
       this.unmuteButton,
+      this.autoButton,
       this.talkButton,
     );
     this.render();
   }
 
+  /** True while any transmission is arriving, waiting, or playing. */
+  get busy(): boolean {
+    return this.inbound > 0 || this.queue.length > 0 || this.current !== null;
+  }
+
   /** Queues a dispatcher transmission; it arrives after a short delay. */
   receive(message: RadioMessage, delayMs = randomBetween(500, 900)): void {
+    this.inbound += 1;
     window.setTimeout(() => {
+      this.inbound -= 1;
       if (this.destroyed) return;
       this.queue.push({ ...message, arrivedAt: performance.now() });
       playSfx("blip");
       if (this.state === "idle") this.state = "incoming";
       this.render();
+      this.autoPlayNext();
     }, delayMs);
+  }
+
+  /** Plays every waiting transmission, auto-play or not (the shift is over). */
+  drain(): void {
+    this.draining = true;
+    this.render();
+    this.autoPlayNext();
+  }
+
+  setAutoPlay(on: boolean): void {
+    if (this.destroyed || on === this.autoPlay) return;
+    this.autoPlay = on;
+    saveAutoPlay(on);
+    playSfx(on ? "select" : "cancel");
+    this.render();
+    this.autoPlayNext();
   }
 
   /** Space bar push-to-talk (hold). */
@@ -186,18 +254,38 @@ export class DispatchRadio {
   }
 
   private unmute(): void {
-    const next = this.queue.shift();
-    if (this.state !== "incoming" || !next) return playSfx("deny");
+    if (this.state !== "incoming" || !this.queue.length) return playSfx("deny");
     playSfx("click");
-    this.options.onUnmute(performance.now() - next.arrivedAt);
+    this.playNext(true);
+  }
+
+  /** With auto-play on, plays the next transmission once the radio is free. */
+  private autoPlayNext(): void {
+    if (
+      (this.autoPlay || this.draining) &&
+      this.state === "incoming" &&
+      !this.transcribing &&
+      this.queue.length
+    ) {
+      this.playNext(false);
+    }
+  }
+
+  private playNext(unmuted: boolean): void {
+    const next = this.queue.shift();
+    if (!next) return;
+    // Only a player's unmute counts toward their response time.
+    if (unmuted) this.options.onUnmute(performance.now() - next.arrivedAt);
     this.current = next;
     this.state = "playing";
     this.render();
+    next.onStart?.();
     void next
       .play()
       .catch(() => undefined)
       .then(() => {
         if (this.destroyed) return;
+        next.onEnd?.();
         this.current = null;
         this.state = this.transmission
           ? "listening"
@@ -205,6 +293,7 @@ export class DispatchRadio {
             ? "incoming"
             : "idle";
         this.render();
+        this.autoPlayNext();
       });
   }
 
@@ -272,6 +361,7 @@ export class DispatchRadio {
         ? this.options.onTranscript(text, transmission.provider ?? "browser")
         : "NOTHING HEARD. TRY AGAIN OR REPORT MANUALLY.",
     );
+    this.autoPlayNext();
   }
 
   /** Shows a line on the LCD for a few seconds. */
@@ -326,6 +416,12 @@ export class DispatchRadio {
           : "NO INCOMING AUDIO";
     this.unmuteButton.disabled = state !== "incoming";
     this.unmuteButton.classList.toggle("is-alert", state === "incoming");
+
+    const auto = this.autoPlay || this.draining;
+    this.autoButton.classList.toggle("is-on", auto);
+    this.autoButton.setAttribute("aria-pressed", String(auto));
+    this.autoButton.disabled = this.draining;
+    this.autoState.textContent = auto ? "ON" : "OFF";
 
     this.talkButton.classList.toggle("is-live", listening);
     this.talkButton.setAttribute("aria-pressed", String(listening));

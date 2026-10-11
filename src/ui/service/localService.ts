@@ -248,6 +248,9 @@ export function createLocalNightwatchService(
         recordGaze(observation) {
           bus.emit("gaze:sample", { t: shift.t, ...observation });
         },
+        detain(npcId) {
+          world.detain(npcId);
+        },
         stop() {
           world.stop();
           stops.forEach((stop) => stop());

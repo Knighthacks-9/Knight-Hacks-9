@@ -21,6 +21,7 @@ export {
   locateNpc,
   type InvestigationCase,
   type InvestigationLine,
+  type InvestigationStage,
   type Whereabouts,
 } from "./investigation";
 export {
