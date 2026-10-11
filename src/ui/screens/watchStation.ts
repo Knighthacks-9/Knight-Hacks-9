@@ -1,5 +1,5 @@
 // Screen 3: WATCH_STATION.EXE, the maximized shift window. Camera workspace
-// on the left (2 to 6 feeds, focus mode, report mode, pop-ups, glitches);
+// on the left (4 or 6 feeds, focus mode, report mode, pop-ups, glitches);
 // side console on the right (report control, dispatch radio, end shift).
 import {
   InvestigationDesk,

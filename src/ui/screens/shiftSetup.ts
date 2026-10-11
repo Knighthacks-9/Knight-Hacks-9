@@ -21,7 +21,6 @@ import {
   MIN_ANOMALIES,
   MIN_AURA_SECONDS,
   RATES,
-  effectiveSettings,
   isCustomized,
   planShift,
   saveShiftSettings,
@@ -36,8 +35,6 @@ export function notifyShiftSettings(ctx: AppContext): void {
 }
 
 const DIFFICULTY = ["EASY", "NORMAL", "HARD"];
-/** Difficulty choice that unlocks every other option. */
-const CUSTOM = "custom";
 const DIFFICULTY_NOTE = [
   "Anomalies stay tinted red.",
   "Anomalies flash red for 2 seconds, then blend in.",
@@ -64,24 +61,13 @@ export function openShiftSetup(ctx: AppContext): void {
     notifyShiftSettings(ctx);
   };
 
-  /** A difficulty preset is in force: the options below it are read-only. */
-  const locked = () => !state.settings.custom;
-  /** What the controls show: the player's options, or the preset's. */
-  const view = () =>
-    effectiveSettings(levelConfig(state.level), state.settings);
-
-  function row(
-    label: string,
-    control: HTMLElement,
-    note?: HTMLElement,
-    lockable = true,
-  ) {
+  function row(label: string, control: HTMLElement, note?: HTMLElement) {
     const id = `setup-row-${++rowIds}`;
     control.setAttribute("role", "group");
     control.setAttribute("aria-labelledby", id);
     return h(
       "div",
-      { class: lockable ? "setup-row is-lockable" : "setup-row" },
+      { class: "setup-row" },
       h("span", { class: "setup-label", id }, label),
       control,
       note,
@@ -93,7 +79,6 @@ export function openShiftSetup(ctx: AppContext): void {
     options: readonly (readonly [T, string])[],
     get: () => T,
     set: (value: T) => void,
-    lockable = true,
   ): HTMLElement {
     const buttons = options.map(([value, label]) =>
       h(
@@ -111,10 +96,9 @@ export function openShiftSetup(ctx: AppContext): void {
       ),
     );
     refreshers.push(() =>
-      buttons.forEach((button, i) => {
-        button.setAttribute("aria-pressed", String(options[i][0] === get()));
-        button.disabled = lockable && locked();
-      }),
+      buttons.forEach((button, i) =>
+        button.setAttribute("aria-pressed", String(options[i][0] === get())),
+      ),
     );
     return h("div", { class: "setup-choice" }, ...buttons);
   }
@@ -124,19 +108,14 @@ export function openShiftSetup(ctx: AppContext): void {
     name: string,
     text: () => string,
     step: (dir: number) => boolean,
-    lockable = true,
   ): HTMLElement {
     const value = h("output", {
       class: "menu-shift-value",
       "aria-live": "polite",
     });
-    const buttons: HTMLButtonElement[] = [];
-    refreshers.push(() => {
-      value.textContent = text();
-      for (const b of buttons) b.disabled = lockable && locked();
-    });
-    const button = (dir: number, glyph: string, label: string) => {
-      const b = h(
+    refreshers.push(() => (value.textContent = text()));
+    const button = (dir: number, glyph: string, label: string) =>
+      h(
         "button",
         {
           type: "button",
@@ -146,9 +125,6 @@ export function openShiftSetup(ctx: AppContext): void {
         },
         glyph,
       );
-      buttons.push(b);
-      return b;
-    };
     return h(
       "div",
       { class: "menu-shift" },
@@ -173,7 +149,7 @@ export function openShiftSetup(ctx: AppContext): void {
   ): HTMLElement {
     const length = stepper(
       `${label} time`,
-      () => `${view()[seconds]}s`,
+      () => `${state.settings[seconds]}s`,
       (dir) => {
         const next = Math.min(
           MAX_AURA_SECONDS,
@@ -186,7 +162,7 @@ export function openShiftSetup(ctx: AppContext): void {
     );
     const note = h("p", { class: "setup-note" });
     refreshers.push(() => {
-      const value = view()[mode];
+      const value = state.settings[mode];
       length.hidden = value !== "timed";
       note.textContent =
         value === "auto"
@@ -194,7 +170,7 @@ export function openShiftSetup(ctx: AppContext): void {
           : value === "always"
             ? `${what} for as long as the anomaly lasts.`
             : value === "timed"
-              ? `${what} for the first ${view()[seconds]}s of each anomaly.`
+              ? `${what} for the first ${state.settings[seconds]}s of each anomaly.`
               : `No ${label.toLowerCase()}.`;
     });
     return row(
@@ -204,7 +180,7 @@ export function openShiftSetup(ctx: AppContext): void {
         { class: "setup-effect" },
         choice(
           AURA_MODES.map((m) => [m, capitalize(m)] as const),
-          () => view()[mode],
+          () => state.settings[mode],
           (value) => (state.settings[mode] = value),
         ),
         length,
@@ -216,10 +192,7 @@ export function openShiftSetup(ctx: AppContext): void {
   refreshers.push(() => {
     const level = levelConfig(state.level);
     const { config } = planShift(level, state.shiftSeconds, state.settings);
-    difficultyNote.textContent = locked()
-      ? (DIFFICULTY_NOTE[level.level - 1] ?? "")
-      : `Set every option yourself. Auto options follow ${DIFFICULTY[level.level - 1]}.`;
-    rowsEl.classList.toggle("is-locked", locked());
+    difficultyNote.textContent = DIFFICULTY_NOTE[level.level - 1] ?? "";
     summary.textContent =
       `NEXT SHIFT: ${mmss(config.durationSeconds)} · ${config.cameraCount} cameras · ` +
       `${config.expectedAnomalies} anomalies` +
@@ -229,21 +202,12 @@ export function openShiftSetup(ctx: AppContext): void {
   const rows = [
     row(
       "Difficulty",
-      choice<number | typeof CUSTOM>(
-        [
-          ...LEVELS.map((l) => [l.level, DIFFICULTY[l.level - 1]] as const),
-          [CUSTOM, "CUSTOM"],
-        ],
-        () => (state.settings.custom ? CUSTOM : state.level),
-        (value) => {
-          // A level locks the options to its preset; Custom frees them.
-          state.settings.custom = value === CUSTOM;
-          if (value !== CUSTOM) state.level = value;
-        },
-        false,
+      choice(
+        LEVELS.map((l) => [l.level, DIFFICULTY[l.level - 1]] as const),
+        () => state.level,
+        (level) => (state.level = level),
       ),
       difficultyNote,
-      false,
     ),
     row(
       "Timer",
@@ -259,20 +223,18 @@ export function openShiftSetup(ctx: AppContext): void {
           saveShiftSeconds(next);
           return true;
         },
-        false,
       ),
       h(
         "p",
         { class: "setup-note" },
         `${mmss(MIN_SHIFT_SECONDS)} to ${mmss(MAX_SHIFT_SECONDS)}.`,
       ),
-      false,
     ),
     row(
       "Cameras",
       choice<number | null>(
         [[null, "Auto"], ...CAMERA_OPTIONS.map((n) => [n, String(n)] as const)],
-        () => view().cameraCount,
+        () => state.settings.cameraCount,
         (count) => (state.settings.cameraCount = count),
       ),
     ),
@@ -280,7 +242,7 @@ export function openShiftSetup(ctx: AppContext): void {
       "Anomalies",
       stepper(
         "anomalies",
-        () => String(view().anomalies ?? "AUTO"),
+        () => String(state.settings.anomalies ?? "AUTO"),
         (dir) => {
           // AUTO sits below the minimum: 1 then "-" goes back to AUTO.
           const current = state.settings.anomalies;
@@ -310,7 +272,7 @@ export function openShiftSetup(ctx: AppContext): void {
       "NPC spawn rate",
       choice(
         RATES.map((r) => [r, capitalize(r)] as const),
-        () => view().npcRate,
+        () => state.settings.npcRate,
         (rate) => (state.settings.npcRate = rate),
       ),
     ),
@@ -318,7 +280,7 @@ export function openShiftSetup(ctx: AppContext): void {
       "Pop-up distractions",
       choice(
         DISTRACTION_RATES.map((r) => [r, capitalize(r)] as const),
-        () => view().distractions,
+        () => state.settings.distractions,
         (rate) => (state.settings.distractions = rate),
       ),
     ),
@@ -329,13 +291,12 @@ export function openShiftSetup(ctx: AppContext): void {
           [true, "On"],
           [false, "Off"],
         ] as const,
-        () => view().glitches,
+        () => state.settings.glitches,
         (on) => (state.settings.glitches = on),
       ),
     ),
   ];
 
-  const rowsEl = h("div", { class: "setup-rows" }, ...rows);
   const refresh = () => refreshers.forEach((run) => run());
   const close = () => {
     ctx.root.removeEventListener(SHIFT_SETTINGS_EVENT, refresh);
@@ -353,7 +314,7 @@ export function openShiftSetup(ctx: AppContext): void {
     },
     (body) =>
       body.append(
-        rowsEl,
+        h("div", { class: "setup-rows" }, ...rows),
         summary,
         h(
           "div",
