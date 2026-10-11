@@ -90,7 +90,11 @@ describe("local NightwatchService", () => {
       source: "manual" as const,
     };
     const receipt = await service.submitReport(session.shiftId, report);
-    expect(receipt).toEqual({ reportNumber: 1, cameraId: "cam2" });
+    expect(receipt).toEqual({
+      reportNumber: 1,
+      cameraId: "cam2",
+      duplicate: false,
+    });
     expect(flags).toHaveLength(1);
     expect(flags[0].npcId).toBe("none:cam2");
 
@@ -112,5 +116,43 @@ describe("local NightwatchService", () => {
       service.submitReport(session.shiftId, report),
     ).rejects.toThrow();
     stop();
+  });
+
+  it("files an anomaly only once when it is reported again", async () => {
+    const bus = mitt<AppEvents>();
+    const service = createLocalNightwatchService(bus);
+    const flags: AppEvents["flag:created"][] = [];
+    bus.on("flag:created", (flag) => flags.push(flag));
+    const session = await service.startShift({
+      ...levelConfig(1),
+      durationSeconds: 120,
+    });
+    session.tick(0.5);
+    // A suspect starts acting up in view of cam2.
+    bus.emit("world:suspiciousStart", {
+      id: "test-event",
+      npcId: "test-npc",
+      behavior: "loitering",
+      t: 0.5,
+      x: 0,
+      y: 0,
+      cameraIds: ["cam2"],
+    });
+
+    const report = {
+      cameraId: "cam2",
+      timestamp: 1,
+      source: "manual" as const,
+    };
+    const first = await service.submitReport(session.shiftId, report);
+    const again = await service.submitReport(session.shiftId, {
+      ...report,
+      timestamp: 2,
+    });
+
+    expect(first).toMatchObject({ reportNumber: 1, duplicate: false });
+    expect(again).toMatchObject({ reportNumber: 1, duplicate: true });
+    expect(flags.map((f) => f.npcId)).toEqual(["test-npc"]);
+    service.abandonShift(session.shiftId);
   });
 });
