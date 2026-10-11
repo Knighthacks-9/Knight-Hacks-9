@@ -30,8 +30,17 @@ export interface AppContext {
   /** Full-screen layer above everything (Watch Station, calibration targets). */
   readonly overlay: HTMLElement;
   go(screen: ScreenName, params?: ScreenParams): void;
-  /** Sets the active application's taskbar button; null clears it. */
-  setTask(label: string | null, onToggle?: () => void): void;
+  /**
+   * Sets the active application's taskbar button; null clears it. Pass the
+   * window so the taskbar can raise it and show when it is in front.
+   */
+  setTask(
+    label: string | null,
+    onToggle?: () => void,
+    root?: HTMLElement,
+  ): void;
+  /** Adds a taskbar button for an extra window; returns its remover. */
+  addTask(label: string, root: HTMLElement): () => void;
 }
 
 /** Mounts a screen; returns its cleanup. */

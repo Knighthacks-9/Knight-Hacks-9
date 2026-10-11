@@ -53,7 +53,7 @@ export const mountDebrief: Screen = (ctx, params) => {
     minimized = value;
     win.root.hidden = value;
   }
-  ctx.setTask("SHIFT_DEBRIEF.LOG", () => setMinimized(!minimized));
+  ctx.setTask("SHIFT_DEBRIEF.LOG", () => setMinimized(!minimized), win.root);
   win.body
     .querySelector<HTMLButtonElement>(".btn-go")
     ?.focus({ preventScroll: true });

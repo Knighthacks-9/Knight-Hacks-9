@@ -299,7 +299,7 @@ export const mountCalibration: Screen = (ctx) => {
     minimized = value;
     win.root.hidden = value;
   }
-  ctx.setTask("GAZE_CALIBRATION.EXE", () => setMinimized(!minimized));
+  ctx.setTask("GAZE_CALIBRATION.EXE", () => setMinimized(!minimized), win.root);
 
   const debugPanel = h("pre", {
     class: "debug-overlay",

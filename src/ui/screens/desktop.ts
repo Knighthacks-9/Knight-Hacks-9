@@ -9,9 +9,9 @@ import {
   saveShiftSeconds,
 } from "../../game/levels";
 import type { AppContext, Screen, ScreenName } from "../context";
-import { h, icon, mmss, pad2 } from "../dom";
+import { h, icon, mmss, pad2, prefersReducedMotion } from "../dom";
 import { ICONS } from "../icons";
-import { openFloatingWindow } from "../window";
+import { bringToFront, openFloatingWindow } from "../window";
 import {
   SHIFT_SETTINGS_EVENT,
   notifyShiftSettings,
@@ -135,6 +135,7 @@ export function buildDesktop(
     const existing = openFiles.get(name);
     if (existing?.root.isConnected) {
       existing.root.hidden = false;
+      activate(existing.root);
       return;
     }
     openFiles.set(
@@ -157,7 +158,7 @@ export function buildDesktop(
         { x: 140 + index * 28, y: 40 + index * 28 },
       ),
     );
-    renderTasks();
+    activate(openFiles.get(name)!.root);
   };
   const fileOpeners = TEXT_FILES.map(
     (f, i) => [f.name, () => openTextFile(f.name, f.text, i)] as const,
@@ -221,46 +222,163 @@ export function buildDesktop(
   tickClock();
   window.setInterval(tickClock, 10_000);
 
+  // One button per open window. The button of the window in front looks
+  // pressed; clicking another raises that window, and clicking the pressed
+  // one minimizes it.
+  interface Task {
+    label: string;
+    icon: keyof typeof ICONS;
+    /** The window, when the taskbar can raise and track it. */
+    root?: HTMLElement;
+    /** Minimizes or restores a window that keeps its own minimized state. */
+    toggle?: () => void;
+  }
+  const MINIMIZE_MS = 130;
   const tasks = h("div", { class: "task-list" });
-  let current: { label: string; toggle?: () => void } | null = null;
-  function renderTasks(): void {
-    tasks.replaceChildren();
-    if (current) {
-      const c = current;
-      tasks.append(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "task-btn is-active",
-            title: c.toggle ? "Minimize or restore" : c.label,
-            onclick: () => {
-              playSfx("click");
-              c.toggle?.();
-            },
-          },
-          icon(ICONS.app, "task-icon"),
-          c.label,
-        ),
-      );
+  let current: Task | null = null;
+  const extras = new Set<Task>();
+  /** The window in front, if any. */
+  let active: HTMLElement | null = null;
+  /** Labels already shown, so only a new button plays its entrance. */
+  let shown = new Set<string>();
+
+  const allTasks = (): Task[] => [
+    ...(current ? [current] : []),
+    ...extras,
+    ...[...openFiles].map(([name, file]): Task => ({
+      label: name,
+      icon: "readme",
+      root: file.root,
+    })),
+  ];
+  const visible = (root: HTMLElement) => root.isConnected && !root.hidden;
+  const animate = (root: HTMLElement, name: string, ms: number) => {
+    if (prefersReducedMotion()) return;
+    root.classList.add(name);
+    window.setTimeout(() => root.classList.remove(name), ms);
+  };
+
+  /** Brings a window to the front and marks its taskbar button. */
+  function activate(root: HTMLElement | null): void {
+    if (root) watch(root);
+    active = root && visible(root) ? root : null;
+    if (active) bringToFront(active);
+    for (const task of allTasks()) {
+      task.root?.classList.toggle("is-inactive", task.root !== active);
     }
-    for (const [name, file] of openFiles) {
-      tasks.append(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "task-btn",
-            onclick: () => {
-              file.root.hidden = !file.root.hidden;
-            },
-          },
-          icon(ICONS.readme, "task-icon"),
-          name,
-        ),
-      );
+    renderTasks();
+  }
+
+  /** After a window closes or minimizes, the next one down takes over. */
+  function activateTopmost(): void {
+    const open = allTasks()
+      .map((task) => task.root)
+      .filter((root): root is HTMLElement => !!root && visible(root));
+    open.sort((a, b) => Number(b.style.zIndex) - Number(a.style.zIndex));
+    activate(open[0] ?? null);
+  }
+
+  function onTaskClick(task: Task): void {
+    const { root } = task;
+    if (!root) {
+      playSfx("click");
+      task.toggle?.();
+      return;
+    }
+    if (!visible(root)) {
+      // Minimized: bring it back.
+      playSfx("blip");
+      if (task.toggle) task.toggle();
+      else root.hidden = false;
+      animate(root, "is-restoring", 180);
+      activate(root);
+    } else if (root !== active) {
+      // Behind another window: raise it.
+      playSfx("select");
+      animate(root, "is-raised", 220);
+      activate(root);
+    } else if (task.toggle || task !== current) {
+      // Already in front: minimize it.
+      playSfx("click");
+      const minimize = () => {
+        if (task.toggle) task.toggle();
+        else root.hidden = true;
+        activateTopmost();
+      };
+      if (prefersReducedMotion()) return minimize();
+      root.classList.add("is-minimizing");
+      window.setTimeout(() => {
+        root.classList.remove("is-minimizing");
+        minimize();
+      }, MINIMIZE_MS);
     }
   }
+
+  function renderTasks(): void {
+    const list = allTasks();
+    tasks.replaceChildren(
+      ...list.map((task) => {
+        // A window the taskbar cannot track (no root) always reads as active.
+        const isActive = task.root ? task.root === active : true;
+        return h(
+          "button",
+          {
+            type: "button",
+            class: [
+              "task-btn",
+              isActive && "is-active",
+              !shown.has(task.label) && "is-new",
+              task.root && !visible(task.root) && "is-minimized",
+            ]
+              .filter(Boolean)
+              .join(" "),
+            "aria-pressed": String(isActive),
+            title: task.label,
+            onclick: () => onTaskClick(task),
+          },
+          icon(ICONS[task.icon], "task-icon"),
+          h("span", { class: "task-label" }, task.label),
+        );
+      }),
+    );
+    shown = new Set(list.map((task) => task.label));
+  }
+
+  // Clicking inside a window brings it forward, like its taskbar button.
+  const onWindowPress = (event: Event) => {
+    const hit = allTasks().find((task) =>
+      task.root?.contains(event.target as Node),
+    );
+    if (hit?.root && hit.root !== active) activate(hit.root);
+  };
+  layer.addEventListener("pointerdown", onWindowPress, true);
+  overlay.addEventListener("pointerdown", onWindowPress, true);
+
+  // Windows also hide, show and close on their own (title-bar buttons, screen
+  // changes); keep the taskbar in step with them.
+  const watcher = new MutationObserver((records) => {
+    for (const task of extras) {
+      if (!task.root?.isConnected) extras.delete(task);
+    }
+    const reopened = records
+      .map((record) => record.target)
+      .find(
+        (node): node is HTMLElement =>
+          node instanceof HTMLElement &&
+          visible(node) &&
+          node !== active &&
+          allTasks().some((task) => task.root === node),
+      );
+    if (reopened) activate(reopened);
+    else if (active && !visible(active)) activateTopmost();
+    else renderTasks();
+  });
+  // Only whole windows are watched, so busy screens don't redraw the taskbar.
+  for (const host of [layer, overlay]) {
+    watcher.observe(host, { childList: true });
+  }
+  const watch = (root: HTMLElement) =>
+    watcher.observe(root, { attributes: true, attributeFilter: ["hidden"] });
 
   const startItem = (
     label: string,
@@ -378,11 +496,23 @@ export function buildDesktop(
       closeMenu();
       for (const file of openFiles.values()) file.destroy();
       openFiles.clear();
-      renderTasks();
+      extras.clear();
+      activate(null);
     },
-    setTask(label: string | null, toggle?: () => void) {
-      current = label ? { label, toggle } : null;
-      renderTasks();
+    setTask(label: string | null, toggle?: () => void, root?: HTMLElement) {
+      current = label ? { label, icon: "app", toggle, root } : null;
+      if (root) activate(root);
+      else activateTopmost();
+    },
+    /** Adds a taskbar button for a window opened on top of the current app. */
+    addTask(label: string, root: HTMLElement): () => void {
+      const task: Task = { label, icon: "window", root };
+      extras.add(task);
+      activate(root);
+      return () => {
+        extras.delete(task);
+        activateTopmost();
+      };
     },
   };
 }
@@ -557,7 +687,7 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
     win.root.hidden = value;
     if (!value) begin.focus();
   }
-  ctx.setTask("KNIGHT'S EYE", () => setMinimized(!minimized));
+  ctx.setTask("KNIGHT'S EYE", () => setMinimized(!minimized), win.root);
   return () => {
     ctx.root.removeEventListener(SHIFT_SETTINGS_EVENT, showShift);
     stopPremium();

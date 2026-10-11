@@ -344,7 +344,7 @@ export const mountWatchStation: Screen = (ctx, params) => {
   });
   win.body.append(h("div", { class: "ws-main" }, workspace, console_), reticle);
   ctx.overlay.append(win.root);
-  ctx.setTask("WATCH_STATION.EXE");
+  ctx.setTask("WATCH_STATION.EXE", undefined, win.root);
   updateTimer(0);
   updateReportPanel();
 
