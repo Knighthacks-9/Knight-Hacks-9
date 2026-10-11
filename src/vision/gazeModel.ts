@@ -1,6 +1,5 @@
 import type { GazeFeatures } from "./gazeFeatures";
 import type { GazePoint } from "./gazeController";
-import type { HeadPosition } from "./headAlignment";
 
 /*
  * Gaze geometry. The webcam sits at the screen, roughly in its plane. The
@@ -79,12 +78,6 @@ export interface GazeModel {
   version: 3;
   /** Yaw-corrected face scale at the calibration distance (depth 1). */
   refScale: number;
-  /**
-   * Where the head sat while calibrating. The face is kept in view relative
-   * to this, so it works at whatever distance the camera is (a phone held
-   * close, a laptop at arm's length). Older calibrations lack it.
-   */
-  head?: HeadPosition;
   x: GazeAxisModel;
   y: GazeAxisModel;
   validation: GazeValidationPoint[];
@@ -412,19 +405,9 @@ export function fitGazeModel(samples: CalibrationSample[]): GazeModel | null {
   const x = fitAxis(groups, "x", refScale);
   const y = fitAxis(groups, "y", refScale);
   if (!x || !y) return null;
-  const frames = groups.flatMap((group) => group.frames);
-  const typical = (read: (f: GazeFeatures) => number) =>
-    median(frames.map(read));
   return {
     version: 3,
     refScale,
-    head: {
-      x: typical((f) => f.faceX),
-      y: typical((f) => f.faceY),
-      scale: typical((f) => f.faceScale),
-      yaw: typical((f) => f.yaw),
-      pitch: typical((f) => f.pitch),
-    },
     x: x.model,
     y: y.model,
     validation: groups.map((group, i) => ({
@@ -588,24 +571,10 @@ export function parseGazeModel(value: unknown): GazeModel | null {
   ) {
     return null;
   }
-  // The head position and corrections are optional extras: drop them if
-  // malformed rather than losing the whole calibration.
-  const { head, correction, ...core } = model as GazeModel;
-  return {
-    ...core,
-    ...(isHeadPosition(head) ? { head } : {}),
-    ...(isCorrection(correction) ? { correction } : {}),
-  };
-}
-
-function isHeadPosition(value: unknown): value is HeadPosition {
-  if (!value || typeof value !== "object") return false;
-  const head = value as Partial<HeadPosition>;
-  return (
-    [head.x, head.y, head.yaw, head.pitch].every(Number.isFinite) &&
-    Number.isFinite(head.scale) &&
-    head.scale! > 0
-  );
+  // Corrections are an optional extra: drop them if malformed rather than
+  // losing the whole calibration.
+  const { correction, ...core } = model as GazeModel;
+  return isCorrection(correction) ? { ...core, correction } : core;
 }
 
 function isCorrection(value: unknown): value is GazeCorrection {

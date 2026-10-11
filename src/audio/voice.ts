@@ -2,30 +2,30 @@
 // with the free browser speech APIs as a fallback. The API key never reaches
 // the browser.
 //
-// - The realistic voice is a premium feature (see ./premium.ts): the player
-//   can turn it off, ?voice=free skips it, and after ElevenLabs answers with a
-//   status retrying won't fix (bad key, no credits, not configured) it is not
+// - After ElevenLabs answers 401 (bad key) or 429 (out of credits), it is not
 //   called again this session.
-// - Pre-generated lines are the same voice, so they follow the same switch:
-//   with it off, every line uses the browser voice.
-// - ElevenLabs speech-to-text is opt-in (VITE_ELEVENLABS_STT=true); otherwise
-//   push-to-talk uses the browser's speech recognition only.
+// - ?voice=free in the URL skips ElevenLabs entirely, to save credits.
 // - Every call logs the provider it used (console.info) for demos.
 import type { VoiceProvider } from "../shared/types";
-import { premium } from "./premium";
 
 const TTS_URL = "/api/tts";
 const STT_URL = "/api/stt";
-const STT_OPT_IN = import.meta.env.VITE_ELEVENLABS_STT === "true";
-/** Statuses that mean ElevenLabs won't work this session. */
-const PERMANENT_FAILURES = [401, 402, 403, 404, 429, 500];
 
-const voiceOn = () => premium.enabled("voice");
-const sttOn = () => STT_OPT_IN && voiceOn();
+let elevenLabsOff = forcedFree();
+if (elevenLabsOff) {
+  console.info("[voice] ?voice=free: using browser speech only.");
+}
+
+function forcedFree(): boolean {
+  return (
+    typeof location !== "undefined" &&
+    new URLSearchParams(location.search).get("voice") === "free"
+  );
+}
 
 function noteFailure(service: string, status: number): void {
-  if (PERMANENT_FAILURES.includes(status)) {
-    premium.markUnsupported("voice");
+  if (status === 401 || status === 429) {
+    elevenLabsOff = true;
     console.warn(
       `[voice] ElevenLabs ${service} returned ${status}; using browser speech for the rest of this session.`,
     );
@@ -34,22 +34,9 @@ function noteFailure(service: string, status: number): void {
   }
 }
 
-/** True when this browser can take a push-to-talk transcript at all. */
-export function voiceInputSupported(): boolean {
-  if (typeof window === "undefined") return false;
-  const w = window as unknown as Record<string, unknown>;
-  return Boolean(
-    w.SpeechRecognition ||
-    w.webkitSpeechRecognition ||
-    (STT_OPT_IN &&
-      typeof navigator.mediaDevices?.getUserMedia === "function" &&
-      typeof MediaRecorder !== "undefined"),
-  );
-}
-
 /** Speaks a line in the dispatcher voice. Resolves when playback finishes. */
 export async function speak(text: string): Promise<VoiceProvider> {
-  if (voiceOn()) {
+  if (!elevenLabsOff) {
     try {
       const response = await fetch(TTS_URL, {
         method: "POST",
@@ -82,10 +69,6 @@ export async function playDispatchLine(
   id: string,
   text: string,
 ): Promise<void> {
-  if (!voiceOn()) {
-    await speak(text);
-    return;
-  }
   try {
     const audio = new Audio(
       `${import.meta.env.BASE_URL}audio/dispatch_${id}.mp3`,
@@ -164,13 +147,12 @@ export interface Transmission {
 }
 
 /**
- * Runs the browser's speech recognition and, when ElevenLabs speech-to-text
- * is opted in, records the microphone at the same time, so a transcript is
- * ready either way.
+ * Starts recording the microphone (for ElevenLabs) and running the browser's
+ * speech recognition at the same time, so a transcript is ready either way.
  */
 export function startListening(): Transmission {
   const recognizer = startRecognition();
-  const recording = sttOn() ? startRecording() : Promise.resolve(null);
+  const recording = elevenLabsOff ? Promise.resolve(null) : startRecording();
   let provider: VoiceProvider | null = null;
 
   return {
@@ -183,7 +165,7 @@ export function startListening(): Transmission {
         recognizer.stop(),
       ]);
 
-      if (audio && audio.size > 0 && sttOn()) {
+      if (audio && audio.size > 0 && !elevenLabsOff) {
         try {
           const response = await fetch(STT_URL, {
             method: "POST",

@@ -1,12 +1,5 @@
 // Screen 4: SHIFT_DEBRIEF.LOG, the attention and performance debrief.
-import {
-  debriefFacts,
-  debriefTemplate,
-  playSfx,
-  speak,
-  stopSpeaking,
-  writeDispatchLine,
-} from "../../audio";
+import { playSfx } from "../../audio";
 import type { Screen } from "../context";
 import { h, mmss } from "../dom";
 import { MISSED_PREFIX, type ShiftResult, type TimelineRow } from "../service";
@@ -18,24 +11,6 @@ const secs = (ms: number | null) =>
 export const mountDebrief: Screen = (ctx, params) => {
   const result = params.result;
   let minimized = false;
-  let closed = false;
-  // The dispatcher's summary: the template now, the AI's wording (spoken)
-  // once it arrives. Only read aloud right after a shift.
-  const dispatcherLine = h("p", null);
-  const dispatch = result?.dispatcherDebrief;
-  if (dispatch) {
-    const template = debriefTemplate(dispatch);
-    dispatcherLine.textContent = `> ${template}`;
-    if (params.announce) {
-      void writeDispatchLine("debrief", debriefFacts(dispatch), template).then(
-        (text) => {
-          if (closed) return;
-          dispatcherLine.textContent = `> ${text}`;
-          void speak(text).catch(() => undefined);
-        },
-      );
-    }
-  }
   const win = openFloatingWindow(
     ctx.layer,
     {
@@ -185,18 +160,6 @@ export const mountDebrief: Screen = (ctx, params) => {
           tracked ? `${r.trackingLostSeconds}s lost` : "webcam not used",
         ),
       ),
-      ...(dispatch
-        ? [
-            section(
-              "DISPATCHER",
-              h(
-                "div",
-                { class: "db-coach", "aria-live": "polite" },
-                dispatcherLine,
-              ),
-            ),
-          ]
-        : []),
       h(
         "div",
         { class: "db-columns" },
@@ -222,11 +185,7 @@ export const mountDebrief: Screen = (ctx, params) => {
     ];
   }
 
-  return () => {
-    closed = true;
-    stopSpeaking();
-    win.destroy();
-  };
+  return () => win.destroy();
 };
 
 function stat(

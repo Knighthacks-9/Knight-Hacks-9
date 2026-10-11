@@ -1,6 +1,6 @@
 // Screen 1: the desktop. Wallpaper, shortcuts, taskbar and Start menu are
 // permanent; the KNIGHT'S EYE main-menu window is the "desktop" screen.
-import { playSfx, premium, type PremiumFeature } from "../../audio";
+import { playSfx } from "../../audio";
 import {
   MAX_SHIFT_SECONDS,
   MIN_SHIFT_SECONDS,
@@ -28,7 +28,7 @@ const README = [
   "   and let the pointer stand in for your gaze.",
   "",
   "2. WATCH STATION",
-  "   Watch 4 or 6 feeds (LEVEL_1-3). Look for people loitering,",
+  "   Watch 2, 4 or 6 feeds (Easy to Hard). Look for people loitering,",
   "   revisiting doors, entering restricted rooms, or avoiding cameras.",
   "   Click the corner button on a feed to focus it; ESC restores.",
   "",
@@ -406,13 +406,6 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
     saveShiftSeconds(next);
     notifyShiftSettings(ctx);
   };
-  const premiumRows = [
-    premiumSetting("voice", "Realistic voice"),
-    premiumSetting("ai", "AI dispatcher"),
-  ];
-  const stopPremium = premium.onChange(() =>
-    premiumRows.forEach((row) => row.render()),
-  );
   // Shift Setup can change the length too.
   ctx.root.addEventListener(SHIFT_SETTINGS_EVENT, showShift);
   const begin = h(
@@ -506,7 +499,6 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
               { class: "sr-only" },
               `Between ${mmss(MIN_SHIFT_SECONDS)} and ${mmss(MAX_SHIFT_SECONDS)}.`,
             ),
-            ...premiumRows.map((row) => row.root),
           ),
         ),
         h(
@@ -559,67 +551,7 @@ export const mountMainMenu: Screen = (ctx: AppContext) => {
   }
   ctx.setTask("KNIGHT'S EYE", () => setMinimized(!minimized));
   return () => {
-    stopPremium();
     ctx.root.removeEventListener(SHIFT_SETTINGS_EVENT, showShift);
     win.destroy();
   };
 };
-
-/**
- * An ON/OFF row for a paid feature. While the server is being asked it reads
- * CHECKING; once the feature stops working it is greyed out and says so.
- */
-function premiumSetting(feature: PremiumFeature, label: string) {
-  const id = `premium-${feature}-label`;
-  const button = h("button", {
-    type: "button",
-    class: "btn95 menu-premium-toggle",
-    "aria-labelledby": id,
-    onclick: () => {
-      const { status, preference } = premium.state(feature);
-      if (status === "unsupported") return playSfx("deny");
-      playSfx("click");
-      premium.setPreference(feature, !preference);
-    },
-  });
-  const note = h(
-    "p",
-    { class: "menu-premium-note", hidden: true },
-    "This feature is no longer supported.",
-  );
-  const root = h(
-    "div",
-    { class: "menu-shift-row menu-premium-row" },
-    h("span", { class: "menu-label", id }, label),
-    button,
-  );
-  const wrapper = h("div", { class: "menu-premium" }, root, note);
-
-  function render(): void {
-    const { status, preference, forcedOff } = premium.state(feature);
-    const unsupported = status === "unsupported";
-    wrapper.classList.toggle("is-unsupported", unsupported);
-    note.hidden = !unsupported;
-    button.disabled = status !== "available";
-    button.setAttribute("aria-disabled", String(status !== "available"));
-    button.setAttribute(
-      "aria-pressed",
-      String(status === "available" && preference),
-    );
-    button.textContent =
-      status === "checking"
-        ? "CHECKING..."
-        : unsupported
-          ? "N/A"
-          : preference && !forcedOff
-            ? "ON"
-            : "OFF";
-    button.title = unsupported
-      ? "This feature is no longer supported."
-      : forcedOff
-        ? "Turned off by the URL (?voice=free / ?ai=off)."
-        : "";
-  }
-  render();
-  return { root: wrapper, render };
-}

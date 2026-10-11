@@ -13,6 +13,11 @@ export type DistractionRate = "off" | Rate;
 export type AuraMode = "auto" | "always" | "timed" | "off";
 
 export interface ShiftSettings {
+  /**
+   * True when the player picked Custom and set the options by hand. False
+   * runs the difficulty's own preset and ignores the fields below.
+   */
+  custom: boolean;
   /** Feeds on screen; null follows the difficulty level. */
   cameraCount: number | null;
   /** Anomalies in the shift; null follows the difficulty level. */
@@ -34,6 +39,7 @@ export interface ShiftSettings {
 }
 
 export const DEFAULT_SHIFT_SETTINGS: ShiftSettings = {
+  custom: false,
   cameraCount: null,
   anomalies: null,
   npcRate: "normal",
@@ -96,6 +102,7 @@ export function sanitizeShiftSettings(value: unknown): ShiftSettings {
   >;
   const d = DEFAULT_SHIFT_SETTINGS;
   return {
+    custom: v.custom === true,
     cameraCount: (CAMERA_OPTIONS as readonly unknown[]).includes(v.cameraCount)
       ? (v.cameraCount as number)
       : null,
@@ -137,18 +144,37 @@ export function saveShiftSettings(settings: ShiftSettings): void {
   }
 }
 
-/** True when anything differs from the plain difficulty level. */
+/** True when the player's own options apply, not a difficulty preset. */
 export function isCustomized(settings: ShiftSettings): boolean {
-  const d = DEFAULT_SHIFT_SETTINGS;
-  return (
-    settings.cameraCount !== null ||
-    settings.anomalies !== null ||
-    settings.npcRate !== d.npcRate ||
-    settings.distractions !== d.distractions ||
-    settings.glitches !== d.glitches ||
-    settings.highlight !== d.highlight ||
-    settings.aura !== d.aura
-  );
+  return settings.custom;
+}
+
+/** Crowd, pop-ups and glitches each difficulty level starts from. */
+const LEVEL_PRESETS: Record<
+  number,
+  Pick<ShiftSettings, "npcRate" | "distractions" | "glitches">
+> = {
+  1: { npcRate: "low", distractions: "low", glitches: false },
+  2: { npcRate: "normal", distractions: "normal", glitches: true },
+  3: { npcRate: "high", distractions: "high", glitches: true },
+};
+
+/** The options a difficulty level selects on its own. */
+export function presetSettings(level: LevelConfig): ShiftSettings {
+  return {
+    ...DEFAULT_SHIFT_SETTINGS,
+    cameraCount: level.cameraCount,
+    anomalies: level.expectedAnomalies,
+    ...(LEVEL_PRESETS[level.level] ?? LEVEL_PRESETS[2]),
+  };
+}
+
+/** The options in force: the player's when Custom, else the level's preset. */
+export function effectiveSettings(
+  level: LevelConfig,
+  settings: ShiftSettings,
+): ShiftSettings {
+  return settings.custom ? settings : presetSettings(level);
 }
 
 /**
@@ -181,8 +207,9 @@ export interface ShiftPlan {
 export function planShift(
   level: LevelConfig,
   durationSeconds: number,
-  settings: ShiftSettings,
+  chosen: ShiftSettings,
 ): ShiftPlan {
+  const settings = effectiveSettings(level, chosen);
   return {
     config: {
       level: level.level,
@@ -190,7 +217,8 @@ export function planShift(
         level.cameraCount) as LevelConfig["cameraCount"],
       expectedAnomalies: settings.anomalies ?? level.expectedAnomalies,
       durationSeconds,
-      fixedAnomalies: settings.anomalies !== null,
+      // Only a count the player typed in is exact; presets keep the level's.
+      fixedAnomalies: chosen.custom && chosen.anomalies !== null,
       npcSpawnRate: NPC_SPAWN_RATE[settings.npcRate],
     },
     distractionFrequency: DISTRACTION_FREQUENCY[settings.distractions],
