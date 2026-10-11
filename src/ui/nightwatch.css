@@ -3097,3 +3097,84 @@ body.nw {
   font-size: 18px;
   letter-spacing: 3px;
 }
+
+/* ------------------------------------------------------- shift setup --- */
+
+.setup {
+  width: min(560px, calc(100% - 16px));
+}
+
+.setup .rw-body {
+  overflow-y: auto;
+  color: #111;
+}
+
+.setup-rows {
+  display: grid;
+  gap: 10px;
+  padding: 14px 14px 6px;
+}
+
+.setup-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 12px;
+}
+
+.setup-label {
+  font-size: 22px;
+}
+
+.setup-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.setup-effect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.setup-option {
+  min-width: 64px;
+}
+
+.setup-option[aria-pressed="true"] {
+  background: var(--title-a);
+  color: #fff;
+  border-color: var(--shadow) var(--hi) var(--hi) var(--shadow);
+  box-shadow:
+    inset 1px 1px 0 var(--lo),
+    inset -1px -1px 0 #fff;
+}
+
+.setup-note {
+  grid-column: 2;
+  margin: 0;
+  color: #3f463f;
+  font-size: 17px;
+}
+
+.setup-summary {
+  margin: 8px 14px 0;
+  padding: 4px 10px;
+  background: var(--lcd);
+  border: 2px solid;
+  border-color: #3a403b var(--hi) var(--hi) #3a403b;
+  color: var(--lcd-ink);
+  font-size: 20px;
+}
+
+@media (max-width: 700px) {
+  .setup-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setup-note {
+    grid-column: 1;
+  }
+}
