@@ -94,12 +94,22 @@ describe("shift settings", () => {
       npcRate: "low",
       distractions: "low",
       glitches: false,
+      reportCounter: true,
     });
     expect(presetSettings(hard)).toMatchObject({
       npcRate: "high",
       distractions: "high",
       glitches: true,
+      reportCounter: false,
     });
+    // Normal hides the count too; Custom follows the player's choice.
+    expect(planShift(LEVEL, 120, DEFAULT_SHIFT_SETTINGS).reportCounter).toBe(
+      false,
+    );
+    expect(
+      planShift(LEVEL, 120, { ...DEFAULT_SHIFT_SETTINGS, custom: true })
+        .reportCounter,
+    ).toBe(true);
     expect(planShift(easy, 120, DEFAULT_SHIFT_SETTINGS).glitches).toBe(false);
   });
 

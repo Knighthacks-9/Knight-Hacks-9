@@ -333,6 +333,22 @@ export function openShiftSetup(ctx: AppContext): void {
         (on) => (state.settings.glitches = on),
       ),
     ),
+    row(
+      "Report counter",
+      choice(
+        [
+          [true, "On"],
+          [false, "Off"],
+        ] as const,
+        () => view().reportCounter,
+        (on) => (state.settings.reportCounter = on),
+      ),
+      h(
+        "p",
+        { class: "setup-note" },
+        "Shows how many sightings you have reported.",
+      ),
+    ),
   ];
 
   const rowsEl = h("div", { class: "setup-rows" }, ...rows);
