@@ -21,7 +21,8 @@ import {
   type TrackerPhase,
 } from "../../vision";
 import type { AppContext, Screen } from "../context";
-import { clamp, h } from "../dom";
+import { clamp, h, icon } from "../dom";
+import { ICONS } from "../icons";
 import type { CalibrationSettings } from "../service";
 import { openFloatingWindow } from "../window";
 
@@ -105,7 +106,7 @@ export const mountCalibration: Screen = (ctx) => {
         "button",
         {
           type: "button",
-          class: "btn-dark",
+          class: "btn95",
           "aria-label": `Decrease ${name}`,
           onclick: () => onStep(-1),
         },
@@ -115,7 +116,7 @@ export const mountCalibration: Screen = (ctx) => {
         "button",
         {
           type: "button",
-          class: "btn-dark",
+          class: "btn95",
           "aria-label": `Increase ${name}`,
           onclick: () => onStep(1),
         },
@@ -124,13 +125,13 @@ export const mountCalibration: Screen = (ctx) => {
     );
   const webcamButton = h("button", {
     type: "button",
-    class: "btn-dark calib-webcam",
+    class: "btn95 calib-webcam",
     onclick: () => toggleWebcam(),
   });
   const webcamInfo = h("p", { class: "calib-small", "aria-live": "polite" });
   const previewButton = h("button", {
     type: "button",
-    class: "btn-dark btn-small",
+    class: "btn95 btn-small",
     onclick: () => {
       playSfx("click");
       mediaPipeGazeTracker.setPreviewHidden(
@@ -138,10 +139,10 @@ export const mountCalibration: Screen = (ctx) => {
       );
     },
   });
-  const calibInfo = h("p", { class: "calib-small calib-info" });
+  const calibInfo = h("span", { class: "calib-info", "aria-live": "polite" });
   const debugButton = h("button", {
     type: "button",
-    class: "btn-dark",
+    class: "btn95",
     "aria-pressed": "false",
     "aria-keyshortcuts": "D",
     onclick: () => toggleDebug(),
@@ -154,6 +155,13 @@ export const mountCalibration: Screen = (ctx) => {
       h("span", { class: "calib-label" }, label),
       output,
       control,
+    );
+  const panel = (title: string, ...children: HTMLElement[]) =>
+    h(
+      "section",
+      { class: "panel calib-panel" },
+      h("div", { class: "panel-title" }, h("h3", null, title)),
+      h("div", { class: "panel-body" }, ...children),
     );
 
   const win = openFloatingWindow(
@@ -171,9 +179,10 @@ export const mountCalibration: Screen = (ctx) => {
         h(
           "div",
           { class: "calib-head" },
+          icon(ICONS.gaze, "calib-logo"),
           h(
             "div",
-            null,
+            { class: "calib-heading" },
             h("h1", { class: "pixel-title" }, "GAZE CALIBRATION"),
             h(
               "p",
@@ -185,11 +194,9 @@ export const mountCalibration: Screen = (ctx) => {
         ),
         h(
           "div",
-          { class: "calib-panel" },
-          h("h3", { class: "calib-panel-title" }, "POINTER TUNING"),
-          h(
-            "div",
-            { class: "calib-grid" },
+          { class: "calib-grid" },
+          panel(
+            "POINTER TUNING",
             h(
               "div",
               { class: "calib-rows" },
@@ -210,46 +217,56 @@ export const mountCalibration: Screen = (ctx) => {
                   "button",
                   {
                     type: "button",
-                    class: "btn-dark calib-toggle",
+                    class: "btn95 calib-toggle",
                     onclick: () => toggleFallback(),
                   },
                   "TOGGLE",
                 ),
               ),
             ),
+          ),
+          panel(
+            "WEBCAM",
             h(
               "div",
               { class: "calib-camera" },
+              h(
+                "div",
+                { class: "calib-monitor" },
+                icon(ICONS.cctv, "calib-monitor-icon"),
+                webcamInfo,
+              ),
               webcamButton,
-              webcamInfo,
               previewButton,
             ),
           ),
         ),
-        h(
-          "p",
-          { class: "calib-note" },
-          "Until you calibrate, or whenever your eyes are not tracked, the mouse can stand in for gaze.",
-        ),
-        h(
-          "div",
-          { class: "calib-actions" },
+        panel(
+          "EYE CALIBRATION",
           h(
-            "button",
-            {
-              type: "button",
-              class: "btn-dark btn-wide",
-              onclick: () => startCalibration(),
-            },
-            `START ${TARGETS.length}-POINT CALIBRATION`,
+            "p",
+            { class: "calib-note" },
+            "Until you calibrate, or whenever your eyes are not tracked, the mouse can stand in for gaze.",
           ),
           h(
-            "button",
-            { type: "button", class: "btn-dark", onclick: () => startTest() },
-            "TEST GAZE",
+            "div",
+            { class: "calib-actions" },
+            h(
+              "button",
+              {
+                type: "button",
+                class: "btn95 is-default btn-wide",
+                onclick: () => startCalibration(),
+              },
+              `START ${TARGETS.length}-POINT CALIBRATION`,
+            ),
+            h(
+              "button",
+              { type: "button", class: "btn95", onclick: () => startTest() },
+              "TEST GAZE",
+            ),
           ),
         ),
-        calibInfo,
         h(
           "div",
           { class: "calib-foot" },
@@ -258,14 +275,21 @@ export const mountCalibration: Screen = (ctx) => {
             "button",
             {
               type: "button",
-              class: "btn-dark btn-go",
+              class: "btn95 btn-go",
               onclick: () => {
                 playSfx("start");
                 ctx.go("watch");
               },
             },
-            "Continue to shift",
+            "CONTINUE TO SHIFT",
           ),
+        ),
+        h(
+          "div",
+          { class: "ws-statusbar calib-status" },
+          h("i", { class: "status-led", "aria-hidden": "true" }),
+          calibInfo,
+          h("span", { class: "ws-version" }, "v1.04"),
         ),
       ),
   );
@@ -573,7 +597,7 @@ function runCalibration(
     "button",
     {
       type: "button",
-      class: "btn-dark calib-cancel",
+      class: "btn95 calib-cancel",
       onclick: () => stop(true),
     },
     "CANCEL (ESC)",
@@ -962,7 +986,7 @@ function createAlignMonitor(onLock: () => void) {
       "button",
       {
         type: "button",
-        class: "btn-dark",
+        class: "btn95",
         onclick: () => onLock(),
       },
       "START NOW (SPACE)",
@@ -1043,7 +1067,7 @@ function showResult(
   const grade = result.errorPx === null ? "FAILED" : quality(result.errorPx);
   const done = h(
     "button",
-    { type: "button", class: "btn-dark btn-go", onclick: () => actions.done() },
+    { type: "button", class: "btn95 btn-go", onclick: () => actions.done() },
     "DONE",
   );
   const overlay = h(
@@ -1056,7 +1080,8 @@ function showResult(
     },
     h(
       "div",
-      { class: "calib-result-box" },
+      { class: "panel calib-result-box" },
+      h("div", { class: "panel-title" }, h("h3", null, "CALIBRATION_RESULT")),
       h(
         "h2",
         { class: "pixel-title", id: "calib-result-title" },
@@ -1093,7 +1118,7 @@ function showResult(
         { class: "calib-actions" },
         h(
           "button",
-          { type: "button", class: "btn-dark", onclick: () => actions.test() },
+          { type: "button", class: "btn95", onclick: () => actions.test() },
           "TEST GAZE",
         ),
         done,
@@ -1134,7 +1159,7 @@ function runGazeTest(
     "button",
     {
       type: "button",
-      class: "btn-dark",
+      class: "btn95",
       onclick: () => {
         const current = gazeController.getModel();
         if (!current?.correction) return;
@@ -1175,7 +1200,7 @@ function runGazeTest(
   }
   const back = h(
     "button",
-    { type: "button", class: "btn-dark", onclick: () => actions.back() },
+    { type: "button", class: "btn95", onclick: () => actions.back() },
     "BACK (ESC)",
   );
   const overlay = h(
@@ -1204,7 +1229,7 @@ function runGazeTest(
         "button",
         {
           type: "button",
-          class: "btn-dark btn-go",
+          class: "btn95 btn-go",
           onclick: () => actions.shift(),
         },
         "CONTINUE TO SHIFT",
