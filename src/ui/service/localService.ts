@@ -38,9 +38,9 @@ import type {
 } from "./types";
 
 export const LEVELS: readonly LevelConfig[] = [
-  { level: 1, cameraCount: 2, expectedAnomalies: 3 },
-  { level: 2, cameraCount: 4, expectedAnomalies: 5 },
-  // Every camera the world has.
+  { level: 1, cameraCount: 4, expectedAnomalies: 3 },
+  { level: 2, cameraCount: 6, expectedAnomalies: 5 },
+  // Same six cameras as level 2 (the world has six), with more anomalies.
   { level: 3, cameraCount: 6, expectedAnomalies: 8 },
 ];
 

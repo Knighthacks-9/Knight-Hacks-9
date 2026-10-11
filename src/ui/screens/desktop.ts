@@ -28,7 +28,7 @@ const README = [
   "   and let the pointer stand in for your gaze.",
   "",
   "2. WATCH STATION",
-  "   Watch 2, 4 or 6 feeds (Easy to Hard). Look for people loitering,",
+  "   Watch 4 or 6 feeds (LEVEL_1-3). Look for people loitering,",
   "   revisiting doors, entering restricted rooms, or avoiding cameras.",
   "   Click the corner button on a feed to focus it; ESC restores.",
   "",
