@@ -3471,3 +3471,79 @@ body.nw {
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------- scrollbars --- */
+
+/* Late-90s scrollbars everywhere in the desktop: square bevelled thumb,
+   dithered track, arrow buttons at both ends. */
+.nw-root ::-webkit-scrollbar {
+  width: 16px;
+  height: 16px;
+}
+
+.nw-root ::-webkit-scrollbar-track {
+  background-color: var(--hi);
+  background-image: conic-gradient(
+    var(--chrome) 25%,
+    transparent 0 50%,
+    var(--chrome) 0 75%,
+    transparent 0
+  );
+  background-size: 2px 2px;
+}
+
+.nw-root ::-webkit-scrollbar-thumb,
+.nw-root ::-webkit-scrollbar-button {
+  background-color: var(--chrome);
+  border: 2px solid;
+  border-color: var(--hi) var(--shadow) var(--shadow) var(--hi);
+  box-shadow:
+    inset -1px -1px 0 var(--lo),
+    inset 1px 1px 0 #fff;
+}
+
+.nw-root ::-webkit-scrollbar-thumb:active,
+.nw-root ::-webkit-scrollbar-button:active {
+  border-color: var(--shadow) var(--hi) var(--hi) var(--shadow);
+  box-shadow: inset 1px 1px 0 var(--lo);
+}
+
+.nw-root ::-webkit-scrollbar-button {
+  display: none;
+  width: 16px;
+  height: 16px;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* One arrow at each end (no doubled buttons). */
+.nw-root ::-webkit-scrollbar-button:single-button {
+  display: block;
+}
+
+.nw-root ::-webkit-scrollbar-button:single-button:vertical:decrement {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='4'%3E%3Cpath d='M4 0 8 4H0z' fill='%23111'/%3E%3C/svg%3E");
+}
+
+.nw-root ::-webkit-scrollbar-button:single-button:vertical:increment {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='4'%3E%3Cpath d='M0 0h8L4 4z' fill='%23111'/%3E%3C/svg%3E");
+}
+
+.nw-root ::-webkit-scrollbar-button:single-button:horizontal:decrement {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='8'%3E%3Cpath d='M0 4 4 0v8z' fill='%23111'/%3E%3C/svg%3E");
+}
+
+.nw-root ::-webkit-scrollbar-button:single-button:horizontal:increment {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='8'%3E%3Cpath d='M0 0 4 4 0 8z' fill='%23111'/%3E%3C/svg%3E");
+}
+
+.nw-root ::-webkit-scrollbar-corner {
+  background: var(--chrome);
+}
+
+/* Firefox has no scrollbar parts to style: match the colours at least. */
+@supports not selector(::-webkit-scrollbar) {
+  .nw-root * {
+    scrollbar-color: var(--chrome) var(--hi);
+  }
+}
