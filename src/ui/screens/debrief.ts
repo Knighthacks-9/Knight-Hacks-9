@@ -2,7 +2,7 @@
 import { playSfx } from "../../audio";
 import type { Screen } from "../context";
 import { h, mmss } from "../dom";
-import type { ShiftResult, TimelineRow } from "../service";
+import { MISSED_PREFIX, type ShiftResult, type TimelineRow } from "../service";
 import { openFloatingWindow } from "../window";
 
 const secs = (ms: number | null) =>
@@ -172,7 +172,13 @@ export const mountDebrief: Screen = (ctx, params) => {
         h(
           "div",
           { class: "db-coach" },
-          ...r.coaching.map((line) => h("p", null, `> ${line}`)),
+          ...r.coaching.map((line) =>
+            h(
+              "p",
+              { class: line.startsWith(MISSED_PREFIX) ? "is-missed" : null },
+              `> ${line}`,
+            ),
+          ),
         ),
       ),
       actions(),
