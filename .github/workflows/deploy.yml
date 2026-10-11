@@ -25,6 +25,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # The Netlify site that runs the voice/AI functions (repo Settings →
+          # Secrets and variables → Actions → Variables). Unset: free mode only.
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

@@ -282,10 +282,18 @@ export interface InvestigationLine {
   /** Feed number the investigation is about. */
   camera: number;
   text: string;
+  /** The report being investigated. */
+  case: InvestigationCase;
 }
 
 export interface InvestigationDeskOptions {
   shiftSeconds: number;
+  /**
+   * True (the default) squeezes each investigation to close before the shift
+   * ends, and gives late reports a "log it" line. False runs every report at
+   * the normal pace, for a game that waits for dispatch after the shift.
+   */
+  fitToShift?: boolean;
   /** Where the reported person is right now. */
   locate(npcId: string): Whereabouts | null;
   /** Show and speak a line (called in stage order per investigation). */
@@ -312,6 +320,7 @@ interface OpenInvestigation {
  */
 export class InvestigationDesk {
   private open: OpenInvestigation[] = [];
+  private lateWrites = 0;
   private destroyed = false;
   private readonly write: NonNullable<InvestigationDeskOptions["write"]>;
 
@@ -319,15 +328,29 @@ export class InvestigationDesk {
     this.write = options.write ?? writeDispatchLine;
   }
 
+  /** True while any investigation still has lines to deliver. */
+  get busy(): boolean {
+    return this.open.length > 0 || this.lateWrites > 0;
+  }
+
   /** Starts investigating a report filed at shift time t. */
   start(c: InvestigationCase, t: number): void {
     if (this.destroyed) return;
-    const times = planStageTimes(t, this.options.shiftSeconds);
+    const end =
+      this.options.fitToShift === false ? Infinity : this.options.shiftSeconds;
+    const times = planStageTimes(t, end);
     if (!times) {
       const { facts, template } = lateReportLine(c);
+      this.lateWrites += 1;
       void this.write("late", facts, template).then((text) => {
+        this.lateWrites -= 1;
         if (!this.destroyed)
-          this.options.deliver({ stage: "late", camera: c.camera, text });
+          this.options.deliver({
+            stage: "late",
+            camera: c.camera,
+            text,
+            case: c,
+          });
       });
       return;
     }
@@ -361,7 +384,12 @@ export class InvestigationDesk {
         inv.delivering = true;
         void inv.pending.then((text) => {
           if (this.destroyed) return;
-          this.options.deliver({ stage, camera: inv.case.camera, text });
+          this.options.deliver({
+            stage,
+            camera: inv.case.camera,
+            text,
+            case: inv.case,
+          });
           inv.next += 1;
           inv.pending = null;
           inv.delivering = false;

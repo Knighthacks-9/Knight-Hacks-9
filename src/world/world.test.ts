@@ -9,6 +9,7 @@ import type {
 import { startWorld } from "./index";
 import { buildMap, EXITS, idx, isWalkable } from "./map";
 import { findPath } from "./pathfinding";
+import { DETAIN_SECONDS } from "./sim";
 
 describe("world map", () => {
   const map = buildMap();
@@ -112,6 +113,45 @@ describe("startWorld", () => {
     }
     // Shift is over and everyone has left.
     expect(last!.npcs).toHaveLength(0);
+  });
+});
+
+describe("detain", () => {
+  it("ends the event, holds the NPC still, then leads them out", () => {
+    const bus = mitt<AppEvents>();
+    const starts: WorldEvent[] = [];
+    const ends: WorldEvent[] = [];
+    let last: WorldSnapshot | undefined;
+    bus.on("world:suspiciousStart", (e) => starts.push(e));
+    bus.on("world:suspiciousEnd", (e) => ends.push(e));
+    bus.on("world:snapshot", (s) => (last = s));
+    const world = startWorld({
+      bus,
+      seed: 9,
+      shiftSeconds: 600,
+      anomalyCount: 0,
+    });
+    const id = world.spawnSuspicious("loitering");
+    const dt = 1 / 10;
+    let t = 0;
+    while (!starts.some((s) => s.npcId === id) && t < 120)
+      bus.emit("sim:tick", { dt, t: (t += dt) });
+    expect(starts.some((s) => s.npcId === id)).toBe(true);
+
+    expect(world.detain(id)).toBe(true);
+    expect(ends.some((e) => e.npcId === id)).toBe(true);
+    bus.emit("sim:tick", { dt, t: (t += dt) });
+    const held = last!.npcs.find((n) => n.id === id)!;
+    expect(held.suspicious).toBe(false);
+    for (let i = 0; i < 30; i++) bus.emit("sim:tick", { dt, t: (t += dt) });
+    const later = last!.npcs.find((n) => n.id === id)!;
+    expect([later.x, later.y, later.moving]).toEqual([held.x, held.y, false]);
+
+    for (let i = 0; i < DETAIN_SECONDS / dt + 5; i++)
+      bus.emit("sim:tick", { dt, t: (t += dt) });
+    expect(last!.npcs.some((n) => n.id === id)).toBe(false);
+    expect(world.detain(id)).toBe(false);
+    world.stop();
   });
 });
 

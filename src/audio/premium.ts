@@ -10,6 +10,8 @@
 //   storage). An unsupported feature is shown greyed out.
 // - ?voice=free and ?ai=off in the URL force a feature off (dev/demo override).
 
+import { apiUrl } from "./api";
+
 export type PremiumFeature = "voice" | "ai";
 export type PremiumStatus = "checking" | "available" | "unsupported";
 
@@ -34,7 +36,7 @@ export interface PremiumOptions {
 }
 
 const FEATURES: readonly PremiumFeature[] = ["voice", "ai"];
-const STATUS_URL = "/api/status";
+const STATUS_URL = apiUrl("/api/status");
 const STATUS_TIMEOUT_MS = 3000;
 const storageKey = (feature: PremiumFeature) =>
   `night-watch:premium-${feature}`;

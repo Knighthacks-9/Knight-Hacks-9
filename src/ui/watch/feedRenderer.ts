@@ -19,6 +19,7 @@ import {
   facingRow,
   npcSheetUrl,
   sheetFor,
+  type Facing,
 } from "../../shared/npcSprites";
 import { prefersReducedMotion } from "../dom";
 import type { CameraFeed } from "../service";
@@ -39,6 +40,32 @@ const TINT = [143, 170, 151];
 
 export type GlitchKind =
   "jitter" | "split" | "static" | "contrast" | "interference" | "scan";
+
+/** Dispatch's mark on a person, shown on every feed that sees them. */
+export interface PersonMark {
+  kind: "marked" | "captured" | "cleared";
+  /** A security officer stands beside them (the unit is on scene). */
+  unit: boolean;
+}
+
+/** A marked person on this feed, in CSS pixels from the canvas's top-left. */
+export interface MarkBox {
+  npcId: string;
+  mark: PersonMark;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Mark boxes: smallest figure size, and padding around it, in CSS pixels. */
+const MARK_MIN_CSS = 16;
+const MARK_PAD_CSS = 6;
+
+/** The security officer: an NPC sheet tinted uniform blue. */
+const OFFICER_SHEET = "npc1";
+const OFFICER_FILTER =
+  "sepia(1) saturate(3) hue-rotate(175deg) brightness(0.85) drop-shadow(0 0 1px #7fb4ff)";
 
 let grain: HTMLCanvasElement | null = null;
 
@@ -166,6 +193,10 @@ export class FeedRenderer {
   private readonly calm = prefersReducedMotion();
   private glitch: { kind: GlitchKind; seed: number; reduced: boolean } | null =
     null;
+  /** Floor tile (centre) where an officer stands when nobody was there to check. */
+  private readonly unitSpot: Vec2 | null = null;
+  private unitOnScene = false;
+  private boxes: MarkBox[] = [];
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -195,6 +226,21 @@ export class FeedRenderer {
       this.minTileY = Math.min(...ys) - 1;
       this.tilesWide = Math.max(...xs) + 2 - this.minTileX;
       this.tilesHigh = Math.max(...ys) + 2 - this.minTileY;
+      // The visible floor tile nearest the middle of the view.
+      const floor = camera.visibleTiles.filter((i) => map.tiles[i] === "floor");
+      const cx = floor.reduce((s, i) => s + (i % map.width), 0) / floor.length;
+      const cy =
+        floor.reduce((s, i) => s + Math.floor(i / map.width), 0) / floor.length;
+      let best = Infinity;
+      for (const i of floor) {
+        const x = i % map.width;
+        const y = Math.floor(i / map.width);
+        const d = (x - cx) ** 2 + (y - cy) ** 2;
+        if (d < best) {
+          best = d;
+          this.unitSpot = { x: x + 0.5, y: y + 0.5 };
+        }
+      }
     }
     if (feed.imageUrl) {
       const image = new Image();
@@ -236,6 +282,16 @@ export class FeedRenderer {
     this.glitch = kind ? { kind, seed: Math.random() * 1000, reduced } : null;
   }
 
+  /** Shows an officer checking this feed's area (a report with nobody to check). */
+  setUnitOnScene(on: boolean): void {
+    this.unitOnScene = on;
+  }
+
+  /** Marked people seen in the last draw, for the overlay boxes. */
+  get markBoxes(): readonly MarkBox[] {
+    return this.boxes;
+  }
+
   /** Maps a client (viewport) point over this canvas to building tile units. */
   toWorld(clientX: number, clientY: number): Vec2 | null {
     if (!this.feed.source) return null;
@@ -249,11 +305,17 @@ export class FeedRenderer {
     };
   }
 
-  draw(snapshot: WorldSnapshot | null, t: number): void {
+  /** `marks`: dispatch's marks by NPC id (see PersonMark). */
+  draw(
+    snapshot: WorldSnapshot | null,
+    t: number,
+    marks?: ReadonlyMap<string, PersonMark>,
+  ): void {
     this.resize();
     const f = this.frame.getContext("2d")!;
     f.drawImage(this.background, 0, 0);
-    if (this.feed.source) this.drawPeople(f, snapshot, t);
+    this.boxes = [];
+    if (this.feed.source) this.drawPeople(f, snapshot, t, marks);
     this.drawFlicker(f, t);
     this.compose(t);
     this.drawGrain(t);
@@ -263,18 +325,29 @@ export class FeedRenderer {
     f: CanvasRenderingContext2D,
     snapshot: WorldSnapshot | null,
     t: number,
+    marks: ReadonlyMap<string, PersonMark> | undefined,
   ) {
     const id = this.feed.id;
     const r = Math.max(2, this.tileSize * 0.42);
+    const size = Math.max(8, this.tileSize * NPC_FRAME_TILES);
     const now = snapshot?.t ?? t;
     trackAnomalies(snapshot);
     // Draw back to front so people lower on screen overlap those behind.
     const inView = (snapshot?.npcs ?? [])
       .filter((npc) => npc.cameraIds.includes(id))
       .sort((a, b) => a.y - b.y);
-    for (const npc of inView) {
+    for (const person of inView) {
+      const mark = marks?.get(person.id);
+      // A captured suspect has stopped, even on a frame held after the shift.
+      const npc =
+        mark?.kind === "captured" ? { ...person, suspicious: false } : person;
       const x = this.viewX + (npc.x - this.minTileX) * this.tileSize;
       const y = this.viewY + (npc.y - this.minTileY) * this.tileSize;
+      if (mark) {
+        this.addBox(npc.id, mark, x, y, size);
+        // The officer stands beside them, facing them.
+        if (mark.unit) this.drawOfficer(f, x - size * 0.5, y, "right", size);
+      }
       const sheet = npcSheet(sheetFor(npc.id));
       if (sheet) {
         // Feet shadow, then the sprite frame standing on the NPC's position.
@@ -284,7 +357,6 @@ export class FeedRenderer {
         f.fill();
         const row = facingRow(facingFor(npc.facingDeg));
         const col = npc.moving ? Math.floor(t * NPC_WALK_FPS) % 4 : 0;
-        const size = Math.max(8, this.tileSize * NPC_FRAME_TILES);
         f.imageSmoothingEnabled = false;
         f.filter = this.npcFilter(npc, now);
         f.drawImage(
@@ -338,6 +410,75 @@ export class FeedRenderer {
       );
       f.fill();
     }
+    if (this.unitOnScene && this.unitSpot) {
+      const x = this.viewX + (this.unitSpot.x - this.minTileX) * this.tileSize;
+      const y = this.viewY + (this.unitSpot.y - this.minTileY) * this.tileSize;
+      this.drawOfficer(f, x, y, "down", size);
+    }
+  }
+
+  /** A security officer standing with their feet at (x, feetY). */
+  private drawOfficer(
+    f: CanvasRenderingContext2D,
+    x: number,
+    feetY: number,
+    facing: Facing,
+    size: number,
+  ) {
+    f.fillStyle = "rgba(0,0,0,0.4)";
+    f.beginPath();
+    f.ellipse(x, feetY, size * 0.2, size * 0.09, 0, 0, Math.PI * 2);
+    f.fill();
+    const sheet = npcSheet(OFFICER_SHEET);
+    if (!sheet) {
+      f.fillStyle = "#4d8fe0";
+      f.fillRect(
+        Math.round(x - size * 0.12),
+        Math.round(feetY - size * 0.5),
+        Math.round(size * 0.24),
+        Math.round(size * 0.5),
+      );
+      return;
+    }
+    f.imageSmoothingEnabled = false;
+    f.filter = OFFICER_FILTER;
+    f.drawImage(
+      sheet,
+      0,
+      facingRow(facing) * NPC_FRAME,
+      NPC_FRAME,
+      NPC_FRAME,
+      Math.round(x - size / 2),
+      Math.round(feetY - size * NPC_FEET_Y),
+      Math.round(size),
+      Math.round(size),
+    );
+    f.filter = "none";
+  }
+
+  /** Records where a marked person is, in CSS pixels, for the overlay box. */
+  private addBox(
+    npcId: string,
+    mark: PersonMark,
+    x: number,
+    feetY: number,
+    size: number,
+  ) {
+    // The figure fills about the middle 40% x 60% of its sprite frame; pad
+    // the box so it reads at small feed sizes.
+    const sx = this.cssWidth / this.width;
+    const sy = this.cssHeight / this.height;
+    const width = Math.max(MARK_MIN_CSS, size * 0.48 * sx) + MARK_PAD_CSS * 2;
+    const height = Math.max(MARK_MIN_CSS, size * 0.74 * sy) + MARK_PAD_CSS * 2;
+    const middle = (feetY - size * 0.29) * sy;
+    this.boxes.push({
+      npcId,
+      mark,
+      left: x * sx - width / 2,
+      top: middle - height / 2,
+      width,
+      height,
+    });
   }
 
   /**
