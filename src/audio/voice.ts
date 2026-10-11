@@ -12,10 +12,11 @@
 //   push-to-talk uses the browser's speech recognition only.
 // - Every call logs the provider it used (console.info) for demos.
 import type { VoiceProvider } from "../shared/types";
+import { apiUrl } from "./api";
 import { premium } from "./premium";
 
-const TTS_URL = "/api/tts";
-const STT_URL = "/api/stt";
+const TTS_URL = apiUrl("/api/tts");
+const STT_URL = apiUrl("/api/stt");
 const STT_OPT_IN = import.meta.env.VITE_ELEVENLABS_STT === "true";
 /** Statuses that mean ElevenLabs won't work this session. */
 const PERMANENT_FAILURES = [401, 402, 403, 404, 429, 500];

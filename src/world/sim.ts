@@ -22,6 +22,8 @@ const CAMERA_AVOID_COST = 25;
 const MAX_NORMAL_NPCS = 8;
 /** NPCs that spawn ~1s apart at the start of a shift, before the normal pace. */
 const QUICK_START_NPCS = 4;
+/** How long a detained NPC is held in place before being escorted out. */
+export const DETAIN_SECONDS = 10;
 const SHIRT_COLORS = [
   0x4f81bd, 0xc0504d, 0x9bbb59, 0x8064a2, 0x4bacc6, 0xf79646, 0xd9d9d9,
   0x7f6000,
@@ -149,6 +151,23 @@ export class WorldSim {
 
   spawnSuspicious(behavior: SuspiciousBehavior): string {
     return this.spawn(suspiciousPlan(this.map, this.rng, behavior));
+  }
+
+  /**
+   * Security caught this NPC: any suspicious event ends now, they stop where
+   * they are, and they're escorted out (removed) after DETAIN_SECONDS.
+   * Returns false when the NPC has already left.
+   */
+  detain(npcId: string): boolean {
+    const npc = this.npcs.find((n) => n.id === npcId && !n.done);
+    if (!npc) return false;
+    if (npc.active) this.closeEvent(npc);
+    npc.steps = [{ kind: "wait", seconds: DETAIN_SECONDS }];
+    npc.stepIndex = 0;
+    npc.waitLeft = DETAIN_SECONDS;
+    npc.path = [];
+    npc.pathIndex = 0;
+    return true;
   }
 
   private spawn(plan: Plan): string {

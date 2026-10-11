@@ -1954,6 +1954,119 @@ body.nw {
   }
 }
 
+/* Dispatch on the feeds: boxes on marked people (placed by the Watch
+   Station's syncMarks), the case badge, and the feed the radio is on. */
+.feed-marks {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.feed-mark {
+  --mark: var(--amber-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+}
+
+/* Marked: four corner brackets that blink. */
+.feed-mark[data-kind="marked"] {
+  background:
+    linear-gradient(var(--mark), var(--mark)) left top / 9px 3px,
+    linear-gradient(var(--mark), var(--mark)) left top / 3px 9px,
+    linear-gradient(var(--mark), var(--mark)) right top / 9px 3px,
+    linear-gradient(var(--mark), var(--mark)) right top / 3px 9px,
+    linear-gradient(var(--mark), var(--mark)) left bottom / 9px 3px,
+    linear-gradient(var(--mark), var(--mark)) left bottom / 3px 9px,
+    linear-gradient(var(--mark), var(--mark)) right bottom / 9px 3px,
+    linear-gradient(var(--mark), var(--mark)) right bottom / 3px 9px;
+  background-repeat: no-repeat;
+  filter: drop-shadow(1px 1px 0 #000);
+  animation: mark-blink 1s steps(2) infinite;
+}
+
+/* Captured: a solid box. */
+.feed-mark[data-kind="captured"] {
+  --mark: var(--green-text);
+  border: 2px solid var(--mark);
+  box-shadow:
+    0 0 0 1px #000,
+    inset 0 0 0 1px #000,
+    0 0 8px rgba(127, 224, 160, 0.5);
+}
+
+.feed-mark[data-kind="cleared"] {
+  --mark: #c9d3c6;
+  border: 1px dashed var(--mark);
+  opacity: 0.8;
+}
+
+.feed-mark-tag {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  margin-bottom: 3px;
+  padding: 3px 5px;
+  transform: translateX(-50%);
+  background: var(--mark);
+  box-shadow: 1px 1px 0 #000;
+  color: #0d110e;
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+@keyframes mark-blink {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.feed-dispatch {
+  position: absolute;
+  left: 26px;
+  top: 12px;
+  padding: 3px 6px;
+  background: rgba(10, 14, 12, 0.85);
+  border: 1px solid currentColor;
+  color: var(--amber-text);
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.feed-dispatch[data-tone="good"] {
+  color: var(--green-text);
+}
+
+.feed-dispatch[data-tone="bad"] {
+  color: #ff8a80;
+}
+
+/* The radio is talking about this feed. */
+.feed.is-radio {
+  border-color: var(--green);
+}
+
+.feed.is-radio .feed-title {
+  background: #24452f;
+}
+
+/* Shift over: the feeds hold their last frame. */
+.is-wrapping .rec-dot {
+  animation: none;
+  opacity: 0.3;
+}
+
+.ws-banner-wrap {
+  justify-content: center;
+  padding-right: 12px;
+}
+
 /* Signal disruptions (canvas effects are drawn by FeedRenderer). */
 .feed.glitch-contrast .feed-canvas {
   filter: contrast(1.9) brightness(1.25) saturate(0.3);
@@ -2097,6 +2210,11 @@ body.nw {
 
 .report-btn:hover {
   background: #f2c552;
+}
+
+.report-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .report-btn.is-active {
@@ -2290,6 +2408,39 @@ body.nw {
   50% {
     background: #f6d47a;
   }
+}
+
+.radio-auto {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 16px;
+}
+
+.radio-auto.is-on {
+  border-color: var(--shadow) var(--hi) var(--hi) var(--shadow);
+  box-shadow:
+    inset 1px 1px 0 var(--lo),
+    inset -1px -1px 0 #fff;
+}
+
+.radio-auto-led {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  background: #5b6259;
+  border: 1px solid #2a2f2b;
+}
+
+.radio-auto.is-on .radio-auto-led {
+  background: #3fbf62;
+}
+
+.radio-auto-state {
+  margin-left: auto;
+  font-family: var(--font-pixel);
+  font-size: 9px;
 }
 
 .radio-talk {
@@ -3203,7 +3354,6 @@ body.nw {
     grid-column: 1;
   }
 }
-
 
 /* Main menu: premium feature settings (realistic voice, AI dispatcher). */
 .menu-premium .menu-premium-row {

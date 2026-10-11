@@ -1,11 +1,12 @@
 // POST /api/stt with a raw audio blob → ElevenLabs Scribe transcription JSON
 // ({ text, words, ... }). Keeps the API key on the server and passes
 // ElevenLabs error statuses (401, 429) through to the client.
+import { withCors } from "../lib/cors";
 
 /** Push-to-talk clips are short; this keeps a bad client from uploading huge files. */
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
-export default async (req: Request): Promise<Response> => {
+export default withCors(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") {
     return json({ error: "Use POST." }, 405);
   }
@@ -41,7 +42,7 @@ export default async (req: Request): Promise<Response> => {
         upstream.headers.get("Content-Type") ?? "application/json",
     },
   });
-};
+});
 
 export const config = { path: "/api/stt" };
 

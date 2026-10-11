@@ -8,6 +8,7 @@ import {
   SYSTEM_PROMPT,
   cleanDispatchLine,
 } from "../lib/dispatchPrompt";
+import { withCors } from "../lib/cors";
 
 const HF_URL = "https://router.huggingface.co/v1/chat/completions";
 const MAX_STAGE_LENGTH = 40;
@@ -15,7 +16,7 @@ const MAX_FACTS_LENGTH = 1500;
 /** The client gives up after 2 s; don't hold the function open much longer. */
 const UPSTREAM_TIMEOUT_MS = 8000;
 
-export default async (req: Request): Promise<Response> => {
+export default withCors(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") {
     return json({ error: "Use POST." }, 405);
   }
@@ -95,7 +96,7 @@ export default async (req: Request): Promise<Response> => {
   const content = body?.choices?.[0]?.message?.content;
   const text = typeof content === "string" ? cleanDispatchLine(content) : "";
   return json({ text }, 200);
-};
+});
 
 export const config = { path: "/api/dispatch" };
 

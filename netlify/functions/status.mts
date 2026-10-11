@@ -6,16 +6,17 @@
 //        (needs the key's User → Read permission).
 // ai:    HF_TOKEN set and valid. Running out of credits shows up at runtime as
 //        a 402 from /api/dispatch.
+import { withCors } from "../lib/cors";
 
 const CHECK_TIMEOUT_MS = 4000;
 
-export default async (req: Request): Promise<Response> => {
+export default withCors(async (req: Request): Promise<Response> => {
   if (req.method !== "GET") {
     return json({ error: "Use GET." }, 405);
   }
   const [voice, ai] = await Promise.all([voiceWorks(), aiWorks()]);
   return json({ voice, ai }, 200);
-};
+});
 
 export const config = { path: "/api/status" };
 
