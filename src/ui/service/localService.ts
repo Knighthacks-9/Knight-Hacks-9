@@ -6,6 +6,7 @@
 // backend, replace the marked call and keep the NightwatchService contract.
 import type { Emitter } from "mitt";
 import { FLAG_GRACE_SECONDS, loadHistory } from "../../analytics";
+import { debriefInput } from "../../audio";
 import { eventBus } from "../../shared/eventBus";
 import type {
   AppEvents,
@@ -91,6 +92,7 @@ function trackerActive(): boolean {
 
 interface TrackedEvent {
   npcId: string;
+  behavior: SuspiciousBehavior;
   start: number;
   end: number | null;
   /** Last shift second each camera saw the suspect. */
@@ -262,6 +264,7 @@ export function createLocalNightwatchService(
         } else {
           events.set(event.id, {
             npcId: event.npcId,
+            behavior: event.behavior,
             start: event.t,
             end: null,
             seenOn: new Map(),
@@ -312,6 +315,9 @@ export function createLocalNightwatchService(
         reportNumber: shift.reportCount,
         cameraId: report.cameraId,
         duplicate: false,
+        suspect: event
+          ? { npcId: event.npcId, behavior: event.behavior }
+          : null,
       } satisfies ReportReceipt;
     },
 
@@ -392,6 +398,7 @@ export function createLocalNightwatchService(
         telemetry: outcome.telemetry,
         history,
       });
+      result.dispatcherDebrief = debriefInput(report, shift.cameras);
       writeJson(LAST_RESULT_KEY, result);
       return result;
     },
