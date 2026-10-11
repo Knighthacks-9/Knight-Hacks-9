@@ -48,6 +48,11 @@ export interface ReportReceipt {
   /** 1-based count of reports filed this shift. */
   reportNumber: number;
   cameraId: string;
+  /**
+   * True when the anomaly on that feed was already reported. Nothing is
+   * filed and the report doesn't count.
+   */
+  duplicate: boolean;
 }
 
 export interface CalibrationSettings {
